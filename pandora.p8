@@ -4,26 +4,6 @@ __lua__
 -- # pandora
 -- my first pico-8 game
 
--- ## game loop
--- conventions: zero-based by default to make maths easier.
--- arrays start from 1, so transform them to 0-based coordinates.
-
--- to do next
-
--- fix moving mechanics
--- comment out
--- make sure only one move is taken each time you move
-
--- do i need 'moving' anymore?
--- make pandora move more smoothly -- stuck
--- make clouds move
--- create more levels
--- make ice mechanic
--- make lose progress screen like cuphead
--- make title screen
--- make mab
--- add other cats to levels
-
 function _init()
 	-- global variables:
 	win = false
@@ -92,6 +72,25 @@ function _draw()
 	shake_screen()
 	draw_everything()
 end
+
+-- conventions: map is zero-based, arrays are 1-based.
+-- use functions ar() and px() to convert between array and pixels.
+
+-- to do next
+
+-- fix moving mechanics
+-- comment out
+-- make sure only one move is taken each time you move
+
+-- do i need 'moving' anymore?
+-- make pandora move more smoothly -- stuck
+-- make clouds move
+-- create more levels
+-- make ice mechanic
+-- make lose progress screen like cuphead
+-- make title screen
+-- make mab
+-- add other cats to levels
 
 -- ## main flow functions
 
@@ -420,7 +419,7 @@ function draw_everything()
 	draw_obstacles()
 	draw_fog()
 	draw_player()
-	show_debug_info()
+	-- show_debug_info()
 	draw_caption()
 	draw_moves()
 end
