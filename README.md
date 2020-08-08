@@ -19,5 +19,7 @@ To export the game to play on the web in p8.png format:
 How it looks on a website:
 
 ```html
-<a href="./pandora.html"><img class="inline" src="./pandora.p8.png" alt="Play pixelly cat game"/></a>
+<a href="./pandora.html">
+  <img class="inline" src="./pandora.p8.png" alt="Play pixelly cat game"/>
+</a>
 ```
