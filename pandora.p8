@@ -7,6 +7,7 @@ __lua__
 -- to export:
 -- fn + f7 to capture label image
 -- export pandora.p8.png
+-- save pandora.p8.png
 -- export pandora.html
 
 function _init()
@@ -15,13 +16,15 @@ function _init()
 	win = false
 	lose = false
 	in_game = false -- determines whether a level is in progress
+	title_active = true
 	levelling_up = false
 	last_level = 6
 	level = 1
 	t = 0 -- game time in frames
-	unfog_frames = 3
-	caption_frames = 3
+	unfog_frames = 3 -- how fast the unfogging happens
+	caption_frames = 3 -- how fast the captions move
 	cat_frames = 1 -- number of cat tween frames without ice
+	menu_items = 4
 	unfog_pattern={
 		{0, 0, 0, 1, 2, 1, 0, 0, 0},
 		{0, 1, 2, 3, 4, 3, 2, 1, 0},
@@ -34,31 +37,25 @@ function _init()
 		{0, 0, 0, 1, 2, 1, 0, 0, 0}
 	}
 	caption_pattern = {1, 2, 3, 2, 1}
-	 -- counts number of moves excluding against walls
+	medal_text = {"gold", "silver", "bronze", "none"}
+	medal_sprite = {12, 13, 14, 15}
 	anim_frame = 0 -- allows sprites to animate
 	offset = 0 -- screen offset for shaking
 	move_step = 9 -- variable governing move animation
+	play_music = true
+	play_sounds = true
 	ice = false
 	dx = 0
 	dy = 0
 	perfect_moves = 0
 	initial_moves = 0
-	socky_bonus = 10 -- bonus awarded on collecting socky, in addition to the moves reimbursed for the detour
-	get_level_data()
-	-- set number of moves allowed at start
-	-- and "perfect" number of moves required with all sockies (taking account of socky bonus)
-	for k in all(moves_data) do
-		perfect_moves += k[1] - socky_bonus -- if each level completed perfectly with socky
-		initial_moves += k[3] -- get "reasonable" number of moves per level
-	end
-	moves = initial_moves
+	socky_bonus = 10 -- bonus awarded on collecting socky, in addition to the moves reimbursed for the detour. revisit moves_data if changing this
+	game_get_data()
+	moves = 9999
+	best_medal = {4, 4, 4, 4, 4, 4} -- best medal for each level so far, 1=gold, 4=none
 
-	-- colour setup:
-	palt(13, true) -- set colour 13 transparent
-	palt(0, false) -- and black not
-
-	-- gameplay setup:
-	level_reset()
+	reset_palette()
+	title_show()
 end
 
 function _update()
@@ -68,8 +65,15 @@ function _update()
 
 	if btnp() != 0 or ice then
 		-- a button has been pressed
-		if in_game then
-			process_move()
+		if title_active then
+			title_active = false
+			level_reset() -- start current level
+		elseif in_game then
+			move_process()
+		elseif menu_active then
+			menu_process_input()
+		elseif levelling_up then
+			level_end_process_option()
 		elseif win == false and lose == false then -- start new level
 			level_reset()
 		else
@@ -82,13 +86,13 @@ function _update()
 	if unfog_active then unfog_step() end
 	if caption_active then caption_step() end
 	if in_game then
-		catch_up()
+		move_catch_up()
 		if levelling_up and move_step >= 5 then level_up() end
 	end
 end
 
 function _draw()
-	if not in_game then return end
+	if not in_game and not menu_active then return end
 
 	shake_screen()
 	draw_everything()
@@ -102,8 +106,6 @@ end
 -- make clouds move
 -- create more levels
 -- make ice mechanic
--- make lose progress screen like cuphead
--- make title screen
 -- make mab
 -- add other cats to levels
 
@@ -119,12 +121,43 @@ function px(a)
 	return (a-1) * 8
 end
 
+function reset_palette()
+	pal() -- reset palette
+	palt(13, true) -- set colour 13 transparent
+	palt(0, false) -- and black not
+end
+
+function title_show()
+	rectfill(0, 0, 127, 127, 1)
+	local title_colour = {10, 0, 5, 6, 7, 15, 14, 8, 9, 10, 11, 3}
+	for i=1,12 do
+		pal(10, title_colour[13-i])
+		map(0, 32, 8, 128-i*8, 14, 4)
+	end
+	reset_palette()
+	spr(1, 64, 24) -- cat
+	rectfill(32, 72, 95, 111, 2)
+	rectfill(32, 112, 95, 119, 0)
+	print("⬆️⬇️⬅️➡️ move", 40, 80, 7)
+	spr(192, 40, 88)
+	spr(196, 48, 88)
+	spr(194, 56, 88)
+	spr(193, 40, 96)
+	spr(196, 48, 96)
+	spr(195, 56, 96)
+	print("select", 68, 88, 7)
+	print("menu", 76, 96, 7)
+end
+
 function level_reset()
 	x = start_pos[level][1]  -- current position in pixels from 0
 	y = start_pos[level][2]
+	moves = moves_data[level][3]
 	unfog_active = false
 	socky_collect = false
 	caption_active = false
+	title_active = false
+	menu_active = false
 	levelling_up = false
 	ice = ice_data[level]
 	if ice then cat_frames = 3
@@ -134,7 +167,7 @@ function level_reset()
 	anim_frame = 0 -- so that each level starts the same way
 	level_period = #obs_data[level]
 	dir = "r" -- current direction
-	fog_reset()
+	unfog_reset()
 	obstacle_update()
 	unfog_circle()
 	draw_everything()
@@ -142,17 +175,61 @@ function level_reset()
 	in_game = true
 	caption_show("level "..tostr(level), 3, 11, 10)
 	sfx(-1) -- stop playing sound
-	music(1) -- main theme
+	if play_music then music(1) end -- main theme
+end
+
+function level_restart()
+	moves = moves_data[level][3] -- reset back to allowed number of moves
+	level_reset()
 end
 
 function level_up()
 	in_game = false
-	if level != last_level then
-		print3d("pandora got through level "..tostr(level).."!", 8, 64, 7, 0)
-		level += 1
-		return
-	else
-		game_win()
+	level_end_menu()
+end
+
+function level_end_menu()
+	draw_menu_outline()
+	local medal_this_try = 4
+	-- award medal for this attempt: 1=gold 2=silver 3=bronze 4=none
+	if moves >= moves_data[level][4] then medal_this_try = 1
+	elseif moves >= moves_data[level][5] then medal_this_try = 2
+	elseif moves >= moves_data[level][6] then medal_this_try = 3
+	end
+
+	print("pandora got through level "..tostr(level).."!", 8, 24, 7)
+	print("medal:    "..medal_text[medal_this_try], 8, 40, 7)
+	spr(medal_sprite[medal_this_try], 36, 40)
+	print("continue", 32, 56, 11)
+	print("retry level", 32, 64, 12)
+
+	if medal_this_try < best_medal[level] then
+		best_medal[level] = medal_this_try
+	end
+
+	draw_progress()
+	level_end_option = 1 -- default is continue to next level
+	spr(24, 16, 48 + level_end_option * 8)
+end
+
+function level_end_process_option()
+	if btnp(⬆️) or btnp(⬇️) then
+		level_end_option = 3 - level_end_option
+		rectfill(16, 48, 23, 71, 0)
+		spr(24, 16, 48 + level_end_option * 8)
+	elseif btnp(4) then level_end_choose() end
+end
+
+function level_end_choose()
+	if level_end_option == 1 then -- continue to next level
+		if level != last_level then
+			level += 1
+			level_reset()
+		else
+			game_win()
+		end
+	else -- restart level
+		level_restart()
 	end
 end
 
@@ -185,16 +262,17 @@ end
 
 -- ## player move functions
 
-function process_move()
+function move_process()
 	newx = x
 	newy = y
 	if not ice then anim_frame += 1 end
 	obstacle_update()
-	if btnp(⬆️) then attempt_move("u")
-	elseif btnp(⬇️) then attempt_move("d")
-	elseif btnp(⬅️) then attempt_move("l")
-	elseif btnp(➡️) then attempt_move("r")
-	elseif ice then attempt_move(dir)
+	if btnp(⬆️) then move_attempt("u")
+	elseif btnp(⬇️) then move_attempt("d")
+	elseif btnp(⬅️) then move_attempt("l")
+	elseif btnp(➡️) then move_attempt("r")
+	elseif btnp(5) then menu_open()
+	elseif ice then move_attempt(dir)
 	end
 
 	-- todo
@@ -202,7 +280,7 @@ function process_move()
 	-- prevent manual control while moving on ice
 end
 
-function attempt_move(a)
+function move_attempt(a)
 	just_moved = false
 	dir = a
 	if a == "u" then newy = y-8
@@ -211,19 +289,17 @@ function attempt_move(a)
 	elseif a == "r" then newx = x+8
 	end
 
-	if can_move() then start_player_move()
-	else
-		sfx(47) -- hit wall
-	end
+	if move_possible() then move_do()
+	elseif play_sounds then sfx(47) end -- hit wall
 	check_current_cell()
 end
 
-function start_player_move()
+function move_do()
 	-- start a single move
 	-- count down moves once
 	-- update new position immediately but don't draw yet
 	-- start animation 4210
-	play_move_sound()
+	move_sound()
 	moves -= 1
 	dx = 0 -- temporary x offset
 	dy = 0 -- temporary y offset
@@ -237,7 +313,8 @@ function start_player_move()
 	unfog_circle()
 end
 
-function play_move_sound()
+function move_sound()
+	if not play_sounds then return end
 	if dir == "u" then sfx(41)
 	elseif dir == "d" then sfx(42)
 	elseif dir == "l" then sfx(43)
@@ -245,7 +322,7 @@ function play_move_sound()
 	end
 end
 
-function catch_up()
+function move_catch_up()
 	-- adds a temp offset to character based on time
 	if move_step >= 5 then return end
 	if not ice then move_pixels = {4, 2, 1, 0}
@@ -258,7 +335,7 @@ function catch_up()
 	end
 end
 
-function can_move()
+function move_possible()
 	if (newx<0 or newx>120 or newy<0 or newy>120) then return false end
 	-- return false if 0th flag is set for target cell:
 	if fget(mget(map_data_pos[level][1] + newx/8, map_data_pos[level][2] + newy/8), 0) then return false end
@@ -271,13 +348,13 @@ function check_current_cell()
 	if x == 120 and y == goal_height[level] * 8 then
 		levelling_up = true
 		music(-1)
-		sfx(48) -- level end tune
+		if play_sounds then sfx(48) end -- level end tune
 		return
 	end
 	-- check if you've reached socky
 	if x/8 == socky_pos[level][1] and y/8 == socky_pos[level][2] and socky_collect == false then
 		socky_collect = true
-		sfx(45)
+		if play_sounds then sfx(45) end
 		-- reimburse extra moves it would have cost to get socky:
 		socky_add = max(moves_data[level][2] - moves_data[level][1] + 10, 0) -- extra temporary socky boost of 10
 		moves += socky_add
@@ -298,7 +375,7 @@ end
 
 -- ## fog functions
 
-function fog_reset()
+function unfog_reset()
 	-- set fog to max value (8) across map.
 	-- all arrays are 1-based.
 	fog = {}
@@ -408,7 +485,7 @@ function obstacle_hit()
 	moves -= 4
 	if just_moved == false then moves -= 1 end -- ensures score is always subtracted by 5 when obstacle hits you
 	caption_show("-5", 2, 8, 9)
-	sfx(46)
+	if play_sounds then sfx(46) end
 end
 
 -- ## caption functions
@@ -474,6 +551,7 @@ function draw_everything()
 	draw_player()
 	draw_caption()
 	draw_moves()
+	draw_menu()
 	if debug_mode then show_debug_info() end
 end
 
@@ -537,6 +615,39 @@ function draw_moves()
 	print3d(tostr(moves), 128 - #m*4, 0, 7, 0)
 end
 
+function draw_menu()
+	if menu_active == false then return end
+	local music_status = "on"
+	local sounds_status = "on"
+	if not play_music then music_status = "off" end
+	if not play_sounds then sounds_status = "off" end
+
+	draw_menu_outline()
+	print("restart level", 32, 24, 12)
+	print("music is "..music_status, 32, 32, 14)
+	print("sounds are "..sounds_status, 32, 40, 15)
+	print("close", 32, 48, 8)
+	spr(24, 16, 16 + menu_option * 8)
+	draw_progress()
+end
+
+function draw_menu_outline()
+	rectfill(0, 12, 127, 115, 0)
+	for i=0,15 do
+		spr(197, i*8, 8)
+		spr(198, i*8, 112)
+	end
+end
+
+function draw_progress()
+	rectfill(0, 80, 47, 87, 1)
+	spr(1, level*8 - 8, 80)
+	for i=1,last_level do
+		spr(level_sprites[i], i*8 - 8, 88)
+		spr(medal_sprite[best_medal[i]], i*8 - 8, 96)
+	end
+end
+
 function print3d(text, xpos, ypos, col1, col2)
 	print(text, xpos+1, ypos+1, col2)
 	print(text, xpos, ypos, col1)
@@ -557,9 +668,57 @@ function shake_screen()
 	end
 end
 
+function menu_open()
+	menu_active = true
+	menu_option = 1 -- current selected menu
+	-- set menu sprite for each cell
+	-- allow menu to be opened and closed using button 2
+	caption_show("menu", 2, 8, 14)
+	in_game = false
+end
+
+function menu_process_input()
+	if btnp(⬆️) then menu_option -= 1
+	elseif btnp(⬇️) then menu_option += 1
+	elseif btnp(4) then menu_choose()
+	elseif btnp(5) then menu_close()
+	end
+	if menu_option > menu_items then menu_option = 1 end
+	if menu_option <= 0 then menu_option = menu_items end
+end
+
+function menu_choose()
+	if menu_option == 1 then level_restart()
+	elseif menu_option == 2 then
+		if play_music then
+			play_music = false
+			music(-1)
+		else
+			play_music = true
+			music(1)
+		end
+	elseif menu_option == 3 then
+		if play_sounds then
+			play_sounds = false
+			sfx(-1)
+		else
+			play_sounds = true
+			sfx(41)
+		end
+	elseif menu_option == 4 then
+		menu_close()
+	end
+end
+
+function menu_close()
+	-- allow menu to be closed 
+	menu_active = false
+	in_game = true
+end
+
 -- ## level by level data:
 
-function get_level_data()
+function game_get_data()
 	level_bg = {3, 3, 3, 3, 0, 0}
 	goal_height = {7, 9, 5, 10, 1, 14} -- cells from top of screen, base 0
 	fog_height = {7, 6, 1, 1, 1, 3} -- cells from top of screen, base 0. must be >= 1
@@ -634,18 +793,22 @@ function get_level_data()
 	}
 	moves_data = {
 		-- [1] perfect score for each level
-		-- [2] minimum moves needed with socky
+		-- [2] minimum moves needed to complete level with socky
 		-- (excluding socky bonus, subtract 10 from final score when calculating this)
-		-- [3] moves given for each level
-		{34, 44, 39},
-		{30, 62, 35},
-		{28, 28, 33}, -- level 3 is quickest with socky
-		{43, 53, 48},
-		{80, 94, 90}, -- give extra leeway as level is complex
-		{68, 76, 87} -- perfect is 68 with shortcuts, 82 without shortcuts. So to be fair, moves allowed = 82 + 5.
+		-- [3] moves allowed for each level (default [1] + 5)
+		-- [4] remaining points needed for gold (default 15)
+		-- [5] remaining points needed for silver (default 10)
+		-- [6] remaining points needed for bronze (default 5)
+		{34, 44, 39, 15, 10, 5},
+		{30, 62, 35, 15, 10, 5},
+		{28, 28, 33, 15, 10, 5}, -- level 3 is quickest with socky
+		{43, 53, 48, 15, 10, 5},
+		{80, 94, 90, 20, 15, 10}, -- give extra leeway as level is complex
+		{68, 76, 87, 29, 24, 19} -- perfect is 68 with shortcuts, 82 without shortcuts. So to be fair, moves allowed = 82 + 5.
 	}
+	level_moves = {39, 35, 33, 48, 90, 87} -- number of moves given
 	ice_data = {false, false, false, false, false, false}
-
+	level_sprites = {34, 49, 80, 100, 88, 91}
 end
 
 --[[ some characters
@@ -656,13 +819,13 @@ vˇ w∧ x❎ y▤ z▥
 ]]--
 
 __gfx__
-00000000ddd0dd0ddddddddddd0dd0ddddddddddd0dd0ddddddddddd000000000000000000000000000000000000000000000000000000000000000000000000
-00000000ddd0a0adddd0dd0dd00a0add5d0dd0ddd0000dddd0dd0ddd000000000000000000000000000000000000000000000000000000000000000000000000
-00700700d000000dd000a0add00000dd000a0addd00000ddd0000d5d000000000000000000000000000000000000000000000000000000000000000000000000
-00077000000000dd0000000dd00000dd000000ddd00000ddd000000d000000000000000000000000000000000000000000000000000000000000000000000000
-00077000000000dd000000ddd00000ddd00000ddd00000ddd000000d000000000000000000000000000000000000000000000000000000000000000000000000
-00700700000000dd0000000dd50000ddd00000ddd00000ddd00000dd000000000000000000000000000000000000000000000000000000000000000000000000
-0000000050ddd0dd0ddddd0ddd00d0dddd0d00dddd0d05dddd00d0dd000000000000000000000000000000000000000000000000000000000000000000000000
+00000000ddd0dd0ddddddddddd0dd0ddddddddddd0dd0ddddddddddd0000000000000000000000000000000000000000a00000a0700000700000000000000000
+00000000ddd0a0adddd0dd0dd00a0add5d0dd0ddd0000dddd0dd0ddd00000000000000000000000000000000000000009aa0aa90670007609900099055000550
+00700700d000000dd000a0add00000dd000a0addd00000ddd0000d5d00000000000000000000000000000000000000009a0aa090607770604499944050555050
+00077000000000dd0000000dd00000dd000000ddd00000ddd000000d000000000000000000000000000000000000000090090090600600604004004050000050
+00077000000000dd000000ddd00000ddd00000ddd00000ddd000000d000000000000000000000000000000000000000049909940666666602444442050000050
+00700700000000dd0000000dd50000ddd00000ddd00000ddd00000dd000000000000000000000000000000000000000004000400060006000240420005000500
+0000000050ddd0dd0ddddd0ddd00d0dddd0d00dddd0d05dddd00d0dd000000000000000000000000000000000000000000444000006660000022200000555000
 00000000dddddddddddddddddddddddddddddddddddddddddddddddd000000000000000000000000000000000000000000000000000000000000000000000000
 d1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d111d111d1111111111111111111111111dddadddd000000000000000000000000ddddfefdddd7dddddddddddddddddddd
 dddddddddddddddd1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111ddd99ddd000000000000000000000000ddddfef0de2e28dddddddddddddddddd
@@ -720,7 +883,46 @@ d533350dddddddaad533350ddddddd9e9e9e9e9ed533350dddddddc1c1c1c1c106000089a5000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000020000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000
+00000000000000bc0000000000000000020000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+7c8c7c8c7c8c7cbc7c8c7ccc7c8c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+bcac9cbcbcbc9cac9cacbc009cbc0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+bc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+7c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d66666ddd66666dd5777775d5775775dddddddddfffffffdfffffff4ddddaaaaaaadddddadadadaaadadadadadadadadaaaaaaaaddaaaddd0000000000000000
+6ddddd6d6ddddd6d5557755d5577755dddddd6ddf00000f4f00000f4ddaadddddddaadddadaddadddaddadadadadadaddddddddddadddadd0000000000000000
+6d6d6d6d6d666d6d5577555d5577755ddddd6dddf4fff4f4f4fff4f4dadddaaaaadddaddaddaddaaaddaddadadadadadaaaaaaaaadaaadad0000000000000000
+6dd6dd6d6d6d6d6d5777775d5775775dddd6ddddf4f0f4f4f4f0f4f4dadaadddddaadadddadaadddddaadaddadadadadddddddddadadadad0000000000000000
+6d6d6d6d6d666d6d5555555d5555555ddd6dddddfff4f4f4fff4f4f4addaddaaaddaddaddadddaaaaadddaddadadadadaaaaaaaaadaaadad0000000000000000
+6ddddd6d6ddddd6d0000000d0000000dd6dddddd0004f4f40004f4f4adaddadddaddadadddaadddddddaadddadadadaddddddddddadddadd0000000000000000
+d66666ddd66666dd0000000d0000000dddddddddfffff4fffffff4ffadadadaaadadadadddddaaaaaaadddddadadadadaaaaaaaaddaaaddd0000000000000000
+dddddddddddddddddddddddddddddddddddddddd0000000000000d00adadadadadadadadddddddddddddddddadadadaddddddddddddddddd0000000000000000
 __gff__
 0000000000000000000000000000000000000000000000000000000000200000000001010101010101010101010000000101010101010101000101010100000001010101010101010101000000000000010101010101010101010100000000000101010101010101000000000100010100000000000000000000000000000000
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
