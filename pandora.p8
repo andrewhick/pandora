@@ -6,7 +6,6 @@ __lua__
 
 -- to export:
 -- fn + f7 to capture label image
--- export pandora.p8.png
 -- save pandora.p8.png
 -- export pandora.html
 
@@ -74,6 +73,9 @@ function _update()
 			menu_process_input()
 		elseif levelling_up then
 			level_end_process_option()
+		elseif lose then
+			lose = false
+			level_restart()
 		elseif win == false and lose == false then -- start new level
 			level_reset()
 		else
@@ -152,6 +154,8 @@ end
 function level_reset()
 	x = start_pos[level][1]  -- current position in pixels from 0
 	y = start_pos[level][2]
+	dx = 0 -- in case character was part way through move
+	dy = 0
 	moves = moves_data[level][3]
 	unfog_active = false
 	socky_collect = false
@@ -245,8 +249,7 @@ end
 
 function game_lose()
 	in_game = false
-	print("you lose :(", 32, 64, 7)
-	print("press any key", 32, 72, 7)
+	print3d("you lose :( - press any key", 8, 8, 10, 2)
 	lose = true
 end
 
