@@ -4,9 +4,13 @@
 
 Pandora is a pixelly cat game made using the [PICO-8 fantasy console](https://www.lexaloffle.com/pico-8.php).
 
-Explore each level while looking for your long lost socky.
+You can play the game on [andrewhick.com/games](https://www.andrewhick.com/games).
 
-Controls: up, down left and right :)
+Explore each level while looking for your long lost socky. You get a medal if you have time to spare at the end.
+
+* Controls: up, down left and right :)
+* Select: X on mobile, Z on computer
+* Menu: O on mobile, X on computer
 
 ## Exporting
 
