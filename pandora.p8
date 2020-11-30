@@ -140,12 +140,12 @@ function title_show()
 	rectfill(34, 78, 94, 106, 0)
 	rect(33, 77, 93, 105, 14)
 	print("⬆️⬇️⬅️➡️  move", 36, 80, 15)
-	spr(192, 36, 88) -- x
+	spr(193, 36, 88) -- o mobile
 	spr(196, 44, 88) -- /
-	spr(195, 52, 88) -- x keyboard
-	spr(193, 36, 96) -- o
+	spr(194, 52, 88) -- z keyboard
+	spr(192, 36, 96) -- x mobile
 	spr(196, 44, 96) -- /
-	spr(194, 52, 96) -- z keyboard
+	spr(195, 52, 96) -- x keyboard
 	print("select", 68, 88, 14)
 	print("menu", 76, 96, 8)
 	print(game_version, 120, 120, 6)
@@ -210,7 +210,6 @@ function level_end_menu()
 	if medal_this_try < best_medal[level] then
 		best_medal[level] = medal_this_try
 	end
-
 	draw_progress()
 	level_end_option = 1 -- default is continue to next level
 	spr(24, 16, 48 + level_end_option * 8)
@@ -221,7 +220,7 @@ function level_end_process_option()
 		level_end_option = 3 - level_end_option
 		rectfill(16, 48, 23, 71, 0)
 		spr(24, 16, 48 + level_end_option * 8)
-	elseif btnp(5) then level_end_choose() end
+	elseif btnp(4) then level_end_choose() end
 end
 
 function level_end_choose()
@@ -284,7 +283,7 @@ function move_process()
 	elseif btnp(⬇️) then move_attempt("d")
 	elseif btnp(⬅️) then move_attempt("l")
 	elseif btnp(➡️) then move_attempt("r")
-	elseif btnp(4) then menu_open()
+	elseif btnp(5) then menu_open()
 	elseif ice then move_attempt(dir)
 	end
 
@@ -653,7 +652,7 @@ function draw_menu_outline()
 end
 
 function draw_progress()
-	rectfill(16, 88, 23, 95, 3)
+	rectfill(16, 88, 23, 95, 3) -- green bit for level 3
 	for i=1,last_level do
 		spr(208, i*8 - 8, 80) -- progress bar
 		spr(level_sprites[i], i*8 - 8, 88) -- level sprites
@@ -694,8 +693,8 @@ end
 function menu_process_input()
 	if btnp(⬆️) then menu_option -= 1
 	elseif btnp(⬇️) then menu_option += 1
-	elseif btnp(5) then menu_choose()
-	elseif btnp(4) then menu_close()
+	elseif btnp(4) then menu_choose()
+	elseif btnp(5) then menu_close()
 	end
 	if menu_option > menu_items then menu_option = 1 end
 	if menu_option <= 0 then menu_option = menu_items end
@@ -929,10 +928,10 @@ bc0000000000bc000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-d66666ddd66666dd5577775d5775775dddddddddfffffffdfffffff4ddddaaaaaaadddddadadadaaadadadadadadadadaaaaaaaaddaaadddadadadaa00000000
-6ddddd6d6ddddd6d5775555d5577755dddddd6ddf00000f4f00000f4ddaadddddddaadddadaddadddaddadadadadadaddddddddddadddaddaaadaaad00000000
-6d6d6d6d6d666d6d5775555d5577755ddddd6dddf4fff4f4f4fff4f4dadddaaaaadddaddaddaddaaaddaddadadadadadaaaaaaaaadaaadadaddaddaa00000000
-6dd6dd6d6d6d6d6d5577775d5775775dddd6ddddf4f0f4f4f4f0f4f4dadaadddddaadadddadaadddddaadaddadadadadddddddddadadadaddaaaaadd00000000
+d66666ddd66666dd5777775d5775775dddddddddfffffffdfffffff4ddddaaaaaaadddddadadadaaadadadadadadadadaaaaaaaaddaaadddadadadaa00000000
+6ddddd6d6ddddd6d5557755d5577755dddddd6ddf00000f4f00000f4ddaadddddddaadddadaddadddaddadadadadadaddddddddddadddaddaaadaaad00000000
+6d6d6d6d6d666d6d5577555d5577755ddddd6dddf4fff4f4f4fff4f4dadddaaaaadddaddaddaddaaaddaddadadadadadaaaaaaaaadaaadadaddaddaa00000000
+6dd6dd6d6d6d6d6d5777775d5775775dddd6ddddf4f0f4f4f4f0f4f4dadaadddddaadadddadaadddddaadaddadadadadddddddddadadadaddaaaaadd00000000
 6d6d6d6d6d666d6d5555555d5555555ddd6dddddfff4f4f4fff4f4f4addaddaaaddaddaddadddaaaaadddaddadadadadaaaaaaaaadaaadadaadddaaa00000000
 6ddddd6d6ddddd6dddddddddddddddddd6dddddd0004f4f40004f4f4adaddadddaddadadddaadddddddaadddadadadaddddddddddadddaddddaaaddd00000000
 d66666ddd66666dd5555555d5555555dddddddddfffff4fffffff4ffadadadaaadadadadddddaaaaaaadddddadadadadaaaaaaaaddaaadddaaadaaaa00000000

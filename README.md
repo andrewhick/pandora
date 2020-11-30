@@ -9,8 +9,8 @@ You can play the game on [andrewhick.com/games](https://www.andrewhick.com/games
 Explore each level while looking for your long lost socky. You get a medal if you have time to spare at the end.
 
 * Controls: up, down left and right :)
-* Select: X on mobile and computer
-* Menu: O on mobile, Z on computer
+* Select: O on mobile, Z on computer
+* Menu: X on mobile and computer
 
 ## Exporting
 
