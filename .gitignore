@@ -1,0 +1,6 @@
+/demos
+*.code-workspace
+*.html
+*.js
+*.p8.png
+.DS_Store
