@@ -2,15 +2,19 @@
 
 ## Introduction
 
-Pandora is a pixelly cat game made using the [PICO-8 fantasy console](https://www.lexaloffle.com/pico-8.php).
+Pandora is a pixelly cat game made using the [PICO-8 fantasy console](https://www.lexaloffle.com/pico-8.php), coded in [Lua](https://www.lua.org/).
 
 You can play the game on [andrewhick.com/games](https://www.andrewhick.com/games).
 
-Explore each level while looking for your long lost socky. You get a medal if you have time to spare at the end.
+Get through gardens, dungeons and mountains while looking for your long lost socky. You can get a medal at the end of each level.
 
 * Controls: up, down left and right :)
-* Select: O on mobile, Z on computer
-* Menu: X on mobile and computer
+* Computer: Z = OK or wait, X = menu
+* Mobile: O = OK or wait, X = menu
+
+## Editing
+
+[Buy Pico-8](https://www.lexaloffle.com/pico-8.php) and load the latest .p8 file to edit the game.
 
 ## Exporting
 
@@ -30,3 +34,9 @@ How it looks on a website:
   <img class="inline" src="./pandora.p8.png" alt="Play pixelly cat game"/>
 </a>
 ```
+
+## Main versions
+
+* 00 - First 6 levels
+* 01 - Menu and title screen
+* 02 - Ice levels (7-9)
