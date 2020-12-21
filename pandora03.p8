@@ -12,7 +12,7 @@ __lua__
 function _init()
 	-- global variables:
 	game_version = "03"
-	level = 16
+	level = 1
 	last_level = 16
 	debug_mode = false -- shows debug info and unfogs each level
 	debug_text = "debug mode"
@@ -21,11 +21,12 @@ function _init()
 	in_game = false -- determines whether a level is in progress
 	title_active = true
 	levelling_up = false
+	spotlight = false
 	t = 0 -- game time in frames
 	unfog_frames = 3 -- how fast the unfogging happens
 	caption_frames = 3 -- how fast the captions move
 	cat_frames = 1 -- number of frames between each cat move animation
-	menu_items = 4
+	menu_items = 5
 	medal_text = {"gold", "silver", "bronze", "none"}
 	medal_sprite = {12, 13, 14, 15}
 	anim_frame = 0 -- allows sprites to animate
@@ -50,7 +51,6 @@ function _update()
 	t += 1
 	if moves <= 0 then game_lose() end
 	if win and mab_small_x < 16 then -- animate mab at end
-		debug_text = "do retreat step"
 		mab_retreat_step()
 	end
 
@@ -99,10 +99,9 @@ end
 
 -- to do next
 
+-- create more levels
 -- animate some background cells eg torch, water
 -- make pandora blink
--- create more levels
--- make mab
 
 function ar(a)
 	-- convert 0-based pixel to 1-based array position.
@@ -255,13 +254,12 @@ function game_win()
 		-- if any medal is not gold then it's not perfect
 		if k != 1 then perfect = false break end
 	end
-	perfect = true -- temp for debugging
 	if perfect then
 		for i=0, 15 do -- draw rainbows
 			spr(208, i*8, 8)
 			spr(208, i*8, 112)
 		end
-		spr(255, 96, 24)
+		spr(255, 96, 24) -- trophy
 		pal(10, 11)
 		map(0, 40, 0, 32, 16, 4) -- write perfect in green
 	else
@@ -274,11 +272,11 @@ function game_win()
 end
 
 function game_lose()
-	local lose_text = "you lose :( - press any key"
+	local lose_text = "pandora is tired - try again"
 	local lose_colour = 2
 	in_game = false
 	if mab_hit then
-		lose_text = "mab got you. press any key"
+		lose_text = "mab got you"
 		lose_colour = 8
 		mab_hit = false
 	end
@@ -487,7 +485,6 @@ end
 function show_debug_info()
 	rectfill(0, 0, 64, 7, level_bg[level])
 	print(debug_text, 0, 0, 15)
-	-- print("x "..tostr(x).." y "..tostr(y), 0, 0, 7)
 end
 
 -- ## fog functions
@@ -579,8 +576,6 @@ function unfog_cell(a, b, amt)
 	fog[ar(b)][ar(a)] = max(0, min(8 - amt, old_fog))
 end
 
--- ## obstacle functions:
-
 function obstacle_reset()
 	obstacles = {}
 	for j=1,16 do
@@ -662,7 +657,6 @@ function caption_step()
 end
 
 function mab_start(a, b)
-	-- initialises function to unfog the whole screen
 		offset = 1
 		mab_active = true
 		mab_eyes_open = false
@@ -710,11 +704,13 @@ function mab_retreat_start()
 end
 
 function mab_retreat_step()
+	-- move mab slowly across top right
 	if (t - mab_start_time) % 30 != 29 then return end
 	debug_text = "move mab"
 	mab_small_x += 1
 	rectfill(64, 0, 127, 7, 12)
 	map(120, 16, 8, 0, 16, 0)
+	draw_player()
 	spr(254, mab_small_x*8, 0)
 	dir="r"
 	move_sound()
@@ -744,6 +740,7 @@ function draw_level()
 	if socky_collect == false then
 		spr(28, socky_pos[level][1] * 8, socky_pos[level][2] * 8)
 	end
+	if level == 1 then spr(252, 80, 24) end
 	if level == 16 then
 		spr(27, 56, 0) -- draw mab socky
 	else -- draw goal
@@ -772,6 +769,10 @@ function draw_fog()
 end
 
 function draw_player()
+	if spotlight then
+		circfill(x+3, y+3, 5, 10)
+		circfill(x+3, y+3, 4, 9)
+	end
 	if dir == "u" then spr(5 + anim_frame%2, x+dx, y+dy)
 	elseif dir == "d" then spr(3 + anim_frame%2, x+dx, y+dy)
 	elseif dir == "l" then spr(1 + anim_frame%2, x+dx, y+dy, 1, 1, true, false) -- flip r sprite
@@ -793,7 +794,7 @@ end
 
 function draw_moves()
 	local m = tostr(moves)
-	rectfill(120, 0, 127, 5, level_bg[level])
+	circfill(124, 2, 4, level_bg[level])
 	print3d(tostr(moves), 128 - #m*4, 0, 6, 0)
 end
 
@@ -801,14 +802,19 @@ function draw_menu()
 	if menu_active == false then return end
 	local music_status = "on"
 	local sounds_status = "on"
+	local spotlight_status = "on"
 	if not play_music then music_status = "off" end
 	if not play_sounds then sounds_status = "off" end
+	if not spotlight then spotlight_status = "off" end
 
 	draw_menu_outline()
+	spr(192, 112, 16)
+	spr(195, 120, 16)
 	print("restart level", 32, 24, 12)
 	print("music is "..music_status, 32, 32, 14)
 	print("sounds are "..sounds_status, 32, 40, 15)
-	print("close", 32, 48, 8)
+	print("spotlight is "..spotlight_status, 32, 48, 9)
+	print("close", 32, 56, 8)
 	spr(24, 16, 16 + menu_option * 8)
 	draw_progress()
 end
@@ -921,6 +927,8 @@ function menu_choose()
 			sfx(41)
 		end
 	elseif menu_option == 4 then
+		spotlight = not spotlight
+	elseif menu_option == 5 then
 		menu_close()
 	end
 end
@@ -1038,7 +1046,7 @@ function game_get_data()
 		{34, 42, 49, 25, 20, 15}, -- 13
 		{56, 64, 71, 25, 20, 15}, -- 14
 		{18, 19, 28, 20, 15, 10}, -- 15
-		{100, 100, 100, 15, 10, 5} -- 16
+		{65, 73, 70, 15, 10, 5} -- 16
 	}
 	obs_data = {
 		-- in each level's data, each time period has a set of obstacles.
@@ -1341,9 +1349,9 @@ f4444444444444447f9ff490fffffffff444444477777777ffff44447f9ff490ffffffffdddddddd
 5c0101064445444456565656444444440990990d0900090d000dddddddddd777dd777777777777dddd0000ddd56ee65ddddddddd7577007dddddd0d7d9a9949d
 501000064444944405050505444444440990990d0900090d0000dddddddd7777ddd7777777777dddddd00ddd65622656ddddddddd7777007d7077979dd9945dd
 500010064445944465656565444444440990990d0900090d00000dddddd77777dddd77777777ddddddd00ddd556226557d7dddddd700777770077757ddd94ddd
-50100006444544445050505044444444d09990ddd09990dd070700dddd777777ddddd777777ddddddd0000dd50200205979777ddd70777777770777ddd7a94dd
-50000006444594445656565644444444dd000ddddd000ddd0007000dd7777777ddddddd77ddddddd06000060560ee065d77777ddd7dddd7007700777ddd94ddd
-56666666455545550505050555455455dddddddddddddddd7077707777777777ddddddddddddddddddddddddddd00ddddd7dd7dddddddddd07ddddd7d444500d
+50100006444544445050505044444444d09990ddd09990dd070700dddd777777ddddd777777ddddddd0000dd502002059797ddddd70777777770777ddd7a94dd
+50000006444594445656565644444444dd000ddddd000ddd0007000dd7777777ddddddd77ddddddd06000060560ee065d7777dddd7dddd7007700777ddd94ddd
+56666666455545550505050555455455dddddddddddddddd7077707777777777ddddddddddddddddddddddddddd00ddddd7d7ddddddddddd07ddddd7d444500d
 __gff__
 0000000000000000000000000000000000000000000000000000000000200000000001010101010101010101010000000101010101010101000101010100000001010101010101010101000000000000010101010101010101010100000000000101010101010101000000000100010101010101010101010101000001010100
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000101010101010101010100000001010101404001000001000101000101010101014001010000010000000000000100000000000000000000000000
@@ -1368,7 +1376,7 @@ __map__
 7978787800000000707b00000000007900e4e0e100000000e0e1e0e100004be400000000000000000000000000000000000000000000000000000000000000002f1dcbdecb00c9ccccca00c7ccccc8004c4bd8d6d6d6d6d6d6d6d6d6d6d6d61d0000000000000000000000000000d4e4f2f2f3f2f2f2f2f2f2f2f2f2f2f2f2f2
 d30000000000007000727300700000740000e4000000e4000000000000e44ce400000000000000000000000000000000000000000000000000000000000000002f1dc9ccca001f1f1f1f2fcbdddecb004b4a00000000d400d44a4b4c4d4e4fd6d6002d2d2f2f2d2dd4d42d2dd4d400e6f2f0f0f2f0f0f2f0f0f2f0f0f2f0f0f2
 74007000007273000000000000000000e300e300e300e3e0e1e0e100e0e14ee400000000000000000000000000000000000000000000000000000000000000002fc7c8d4d4d42ec7ccc82fcbd4d4cb004a00d400d4d4d4d6d4d6d4d4d44f5fd6d6002d2d2f2f2d2dd4d42d2dd4e400e6f2f0f0f1f0f0f1f0f0f1f0f0f1f0f0f2
-000000700000000000000000000076000038000000210000006fe44b4d4f5f5e0000000000000000000000000000000000000000000022222222000000000000d6c9cad4d4d42ecbddcb2fc9ccccca00d90000dbd6d6d6d6d6d6d6d7d45f5ed6d6001f1f2d2d2f2f2d2dd4d42f2d00e6e0e1e0e1f0e1e0e1e0e1e0e1e4f3e0e1
+000000700000000000000000000076000038000000210000006fe44b4d4f5f5e0000000000000000000000000000000000000000000022222222000000000000d6c9cad4d4d42ecbddcb2fc9ccccca00d90000dbd6d6d6d6d6d6d6d7d45f5ed6d6001f1f2d2d2f2f2d2dd4d42f2d00e6e0e1e0e1e0e1e0e1e0e1e0e1e4f3e0e1
 000000000000000000d3000000000000e30044424200e3e4e0e1e0e1e0e14fe40000000000000000000000000000000000000000000000000000000000000000d6d4d42f1e1e2dc9ccca2d1e1e1e00000000d4d6d4d4d4d6ddd6d4d6d45ed9d6d6001f1f2d2d2f2f2d2dd4e42d2f00e6e7f1f3e7f3f1f3f1f3f1f3f1e7f1f3e7
 770000710000710000710071007100000000434045004a4c4d4e4f5f5ee44de40000000000000000000000000000000000000000220000000000002200000000d6d4d42fc7c82e1e1e2dc7ccc82ec7ccd4d6d4d6d4d7d6d6d6d6d4d6d45dddd6d6002d2d1f1f2d2d1e1e2d2d2f2d00e6e2f0f0e2f0f0e7f0f0e7f0f0e2f0f0e2
 000000000000007a00000000000000e3000043404000e3e0e1e0e1e45de44be400000000000000000000000000000000000000002200ec0000ec002200000000d6d4d42fc9ca2e44422fcbd8cb2ecbd4d4d7d4d6d4d6d4d6d4d6d4d6d4d4d4d4dd002d2d1f1f2d2d1e1ed42d2d2f00e6e2f0f0e2e5f0e8f0f0e2f0f0e2f0f0e2
