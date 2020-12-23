@@ -11,20 +11,22 @@ __lua__
 
 function _init()
 	-- global variables:
-	game_version = "02"
+	game_version = "03"
 	level = 1
-	last_level = 9
+	last_level = 16
 	debug_mode = false -- shows debug info and unfogs each level
+	debug_text = "debug mode"
 	win = false
 	lose = false
 	in_game = false -- determines whether a level is in progress
 	title_active = true
 	levelling_up = false
+	spotlight = false
 	t = 0 -- game time in frames
 	unfog_frames = 3 -- how fast the unfogging happens
 	caption_frames = 3 -- how fast the captions move
 	cat_frames = 1 -- number of frames between each cat move animation
-	menu_items = 4
+	menu_items = 5
 	medal_text = {"gold", "silver", "bronze", "none"}
 	medal_sprite = {12, 13, 14, 15}
 	anim_frame = 0 -- allows sprites to animate
@@ -38,6 +40,7 @@ function _init()
 	dy = 0
 	socky_bonus = 10 -- bonus awarded on collecting socky, in addition to the moves reimbursed for the detour. revisit moves_data if changing this
 	moves = 9999
+	mab_small_x = 16
 	game_get_data()
 	reset_palette()
 	title_show()
@@ -47,6 +50,9 @@ function _update()
 	-- input and move
 	t += 1
 	if moves <= 0 then game_lose() end
+	if win and mab_small_x < 16 then -- animate mab at end
+		mab_retreat_step()
+	end
 
 	if btnp() != 0 or sliding then
 		-- a button has been pressed
@@ -78,6 +84,7 @@ function _update()
 	if in_game then
 		move_catch_up()
 		if levelling_up and move_step >= 5 then level_up() end
+		if mab_hit and move_step >= 5 then game_lose() end
 	end
 end
 
@@ -89,15 +96,12 @@ function _draw()
 end
 
 -- conventions: map is zero-based, arrays are 1-based.
--- use functions ar() and px() to convert between array and pixels.
 
 -- to do next
 
+-- create more levels
 -- animate some background cells eg torch, water
 -- make pandora blink
--- create more levels
--- add switch mechanic
--- make mab
 
 function ar(a)
 	-- convert 0-based pixel to 1-based array position.
@@ -141,6 +145,7 @@ function title_show()
 end
 
 function level_reset()
+	debug_text = "reset level"
 	x = start_pos[level][1]  -- current position in pixels from 0
 	y = start_pos[level][2]
 	dx = 0 -- in case character was part way through move
@@ -161,13 +166,22 @@ function level_reset()
 	dir = "r" -- current direction
 	unfog_reset()
 	obstacle_update()
+	switch_reset()
 	unfog_circle()
 	draw_everything()
+	if level == 16 then level_16_reset() end
 	if debug_mode then unfog_start() end
 	in_game = true
 	caption_show("level "..tostr(level), 3, 11, 10)
 	sfx(-1) -- stop playing sound
 	if play_music then music(1) end -- main theme
+end
+
+function level_16_reset()
+	mab_reset()
+	mabx = 0
+	maby = 0
+	mab_active = false
 end
 
 function level_restart()
@@ -183,6 +197,12 @@ function level_up()
 end
 
 function level_end_menu()
+	if level == 16 then
+		rectfill(56, 0, 63, 7, 12) -- hide mab socky
+		anim_frame = 0
+		draw_pandora()
+		spr(253, 64, 0)
+	end	
 	draw_menu_outline()
 	local medal_this_try = 4
 	-- award medal for this attempt: 1=gold 2=silver 3=bronze 4=none
@@ -235,6 +255,11 @@ function game_win()
 		if k != 1 then perfect = false break end
 	end
 	if perfect then
+		for i=0, 15 do -- draw rainbows
+			spr(208, i*8, 8)
+			spr(208, i*8, 112)
+		end
+		spr(255, 96, 24) -- trophy
 		pal(10, 11)
 		map(0, 40, 0, 32, 16, 4) -- write perfect in green
 	else
@@ -242,13 +267,22 @@ function game_win()
 		map(0, 36, 4, 32, 15, 4) -- write you win in orange
 	end
 	reset_palette()
-	print3d("press any key", 32, 64, 10, 4)
 	win = true
+	mab_retreat_start()
 end
 
 function game_lose()
+	local lose_text = "pandora is tired - try again"
+	local lose_colour = 2
 	in_game = false
-	print3d("you lose :( - press any key", 8, 8, 10, 2)
+	if mab_hit then
+		lose_text = "mab got you"
+		lose_colour = 8
+		mab_hit = false
+	end
+	rectfill(0, 40, 127, 79, lose_colour)
+	spr(1, 8, 64, 1, 1, false, true)
+	print3d(lose_text, 8, 48, 10, 0)
 	lose = true
 end
 
@@ -261,6 +295,8 @@ end
 -- 3 = left wall (not used yet)
 -- 4 = right wall (not used yet)
 -- 5 = danger
+-- 6 = ice
+-- 7 = unassigned
 
 -- ## player move functions
 
@@ -276,10 +312,6 @@ function move_process()
 	elseif btnp(⬅️) then move_attempt("l")
 	elseif btnp(➡️) then move_attempt("r")
 	end
-
-	-- todo
-	-- make ice movement smooth, based on time
-	-- prevent manual control while moving on ice
 end
 
 function move_attempt(a)
@@ -291,12 +323,13 @@ function move_attempt(a)
 	elseif a == "r" then newx = x+8
 	end
 
-	if move_possible() then move_do()
+	if move_possible() then
+		move_do()
+		check_current_cell()
 	else  -- hit a wall
 		if play_sounds then sfx(47) end
 		sliding = false
 	end
-	check_current_cell()
 end
 
 function move_do()
@@ -315,10 +348,18 @@ function move_do()
 	x = newx
 	y = newy
 	just_moved = true
-	if ice and not sliding then -- start slide
+	if (ice or check_flag(x, y, 6)) and not sliding then
+		-- start slide if ice or new cell is icy
 		sliding = true
 		moves -= 1 -- only reduce moves once when on ice
-	elseif not ice then moves -= 1 end
+		mab_step()
+	elseif sliding and not ice and not check_flag (x, y, 6) then
+		-- stop sliding
+		sliding = false
+	elseif not sliding then
+		moves -= 1
+		mab_step()
+	end
 	unfog_circle()
 end
 
@@ -338,7 +379,7 @@ function move_catch_up()
 		return
 	end
 	-- move_pixels shows at each move_step, how many pixels close to the new position the player should be:
-	if not ice then move_pixels = {4, 2, 1, 0}
+	if not sliding then move_pixels = {4, 2, 1, 0}
 	else move_pixels = {6, 4, 2, 0} end -- more linear movement on ice.
 	if (t - move_time) % cat_frames == 0 then
 		dx = move_pixels[move_step] * (prevx-x) / 8
@@ -350,14 +391,20 @@ end
 function move_possible()
 	if (newx<0 or newx>120 or newy<0 or newy>120) then return false end
 	-- return false if 0th flag is set for target cell:
-	if fget(mget(map_data_pos[level][1] + newx/8, map_data_pos[level][2] + newy/8), 0) then return false end
+	if check_flag(newx, newy, 0) then return false end -- it's a wall
 	return true
+end
+
+function check_flag(a, b, flag)
+	-- checks if flag 0-7 is set for map at pixel coordinates a, b
+	return fget(mget(map_data_pos[level][1] + a/8, map_data_pos[level][2] + b/8), flag)
 end
 
 function check_current_cell()
 	-- checks new cell for anything interesting
 	-- check if you've reached goal
-	if x == 120 and y == goal_height[level] * 8 then
+	if (level == 16 and x == 56 and y == 0) -- get mab socky
+	or (x == 120 and y == goal_height[level] * 8) then -- get goal
 		levelling_up = true
 		music(-1)
 		if play_sounds then sfx(48) end -- level end tune
@@ -375,14 +422,69 @@ function check_current_cell()
 	-- check for moving obstacles
 	if obstacles[ar(y)][ar(x)] > 0 then obstacle_hit() end
 	-- check for static obstacles, if flag 5 is set for currrent cell:
-	if fget(mget(map_data_pos[level][1] + x/8, map_data_pos[level][2] + y/8), 5) then obstacle_hit() end
+	if check_flag(x, y, 5) then obstacle_hit() end
+	-- check for switch
+	if switch_data[level][1] != 16 then check_switches() end
+	-- check for mab eyes
+	if level == 16 then check_mab_eyes() end
+end
+
+function check_switches()
+	-- cycle through all switches
+	-- landing on a switch permanently opens its door
+	for k in all(switch_data[level]) do
+		-- if coordinates match any switch_data[level][1] and [2] and open is false then
+		if x/8 == k[1] and y/8 == k[2] and not k[6] then
+			if play_sounds then sfx(49) end
+			switch_set(k, true)
+			debug_text = tostr(k[1])..","..tostr(k[2])..","..tostr(k[3])..","..tostr(k[4])..","..tostr(k[5])..","..tostr(k[6]) -- temp
+		end
+	end
+end
+
+function check_mab_eyes()
+	for k in all(mab_data) do
+		if x/8 == k[1] and y/8 == k[2] and k[5] == false then
+			-- activate eye
+			k[5] = true
+			mab_start(k[3], k[4])
+			debug_text = "mab start"
+		end
+	end
+end
+
+function switch_set(switch, to_open)
+	-- set switch to to_open true/false
+	-- switch is an array: switch x/y, door x/y, start sprite, open state
+	local switch_sprite_adjust = 0
+	if to_open then switch_sprite_adjust = 1 end
+	-- set switch to open/closed and update map
+	mset(
+		map_data_pos[level][1] + switch[1],
+		map_data_pos[level][2] + switch[2],
+		switch[5] + switch_sprite_adjust -- use sprite + 1 if open
+	)
+	-- set door to open/closed and update map
+	mset(
+		map_data_pos[level][1] + switch[3],
+		map_data_pos[level][2] + switch[4],
+		switch[5] + 2 + switch_sprite_adjust --  use sprite + 1 if open
+	)
+	-- set switch to open
+	switch[6] = to_open -- set switch/door data to open
+end
+
+function switch_reset()
+	-- reset all switches in current level
+	for k in all(switch_data[level]) do
+		-- if coordinates match any switch_data[level][1] and [2] and open is false then
+		if k[1] != 16 then switch_set(k, false) end
+	end
 end
 
 function show_debug_info()
 	rectfill(0, 0, 64, 7, level_bg[level])
-	print("target "..tostr(initial_moves - perfect_moves), 0, 0, 7)
-	-- print("x "..tostr(x).." y "..tostr(y), 0, 0, 7)
-	-- print("dx "..tostr(dx).." dy "..tostr(dy).." ms "..tostr(move_step), 0, 8, 7)
+	print(debug_text, 0, 0, 15)
 end
 
 -- ## fog functions
@@ -474,8 +576,6 @@ function unfog_cell(a, b, amt)
 	fog[ar(b)][ar(a)] = max(0, min(8 - amt, old_fog))
 end
 
--- ## obstacle functions:
-
 function obstacle_reset()
 	obstacles = {}
 	for j=1,16 do
@@ -507,19 +607,17 @@ function obstacle_hit()
 	if play_sounds then sfx(46) end
 end
 
--- ## caption functions
-
 function caption_show(text, col1, col2, col3)
 	caption_text = text
 	cstep = ceil(#caption_text/4)
 	caption_colours = {col1, col2, col3}
 	caption_data = {}
-	reset_caption_data()
+	caption_reset_data()
 	caption_active = true
 	 -- data for each 8x8 character across bottom of screen with character and colour
 end
 
-function reset_caption_data()
+function caption_reset_data()
 	for i=1,16 do
 		caption_data[i] = 16 -- reset caption data to blank
 	end
@@ -536,7 +634,7 @@ function caption_step()
 	if t % caption_frames == 0 then
 		if cstep <= 12 then
 			-- cycle through caption_pattern and set colour data:
-			reset_caption_data()
+			caption_reset_data()
 			for i=1,#caption_pattern do
 				local dp = 7-cstep+i -- draw position of left hand bar
 				if dp >= 1 and dp <= 8 then
@@ -558,16 +656,76 @@ function caption_step()
 	end
 end
 
+function mab_start(a, b)
+		offset = 1
+		mab_active = true
+		mab_eyes_open = false
+		mab_hit = false
+		debug_text = "mab start"
+		mabx = a
+		maby = b
+end
+
+function mab_step()
+	if not mab_active then return end
+	maby += 1
+	if maby >= 16 then
+		mab_active = false
+		debug_text = "mab inactive"
+		return
+	end
+	-- check if collided with pandora
+	local xdiff = x/8 - mabx
+	local ydiff = y/8 - maby
+	if ((ydiff == 1 or ydiff == 0) and (xdiff >= 0 and xdiff <=3)) -- at eye level
+	or (ydiff == 2 and (xdiff == 1 or xdiff == 2)) then -- at mouth level
+		debug_text = "mab hit"
+		mab_hit = true
+	end
+	if ((ydiff >= 0 and ydiff <= 4) and (xdiff >= 0 and xdiff <=3)) then
+		mab_eyes_open = true
+	end
+end
+
+function mab_reset()
+	mab_data = {
+		-- eye position, mab start position, open
+		{1, 14, 0, 0, false},
+		{7, 12, 6, 0, false},
+		{5, 7, 3, -1, false},
+		{8, 5, 9, 0, false},
+		{13, 5, 12, -2, false}
+	}
+end
+
+function mab_retreat_start()
+	mab_start_time = t
+	mab_small_x = 8
+end
+
+function mab_retreat_step()
+	-- move mab slowly across top right
+	if (t - mab_start_time) % 30 != 29 then return end
+	debug_text = "move mab"
+	mab_small_x += 1
+	rectfill(64, 0, 127, 7, 12)
+	map(120, 16, 8, 0, 16, 0)
+	draw_pandora()
+	spr(254, mab_small_x*8, 0)
+	dir="r"
+	move_sound()
+end
+
 -- ## draw functions
 
 function draw_everything()
 	cls()
 	draw_level()
-	draw_socky()
-	draw_goal()
 	draw_obstacles()
+	draw_mab_eyes()
+	if mab_active then draw_mab(mabx, maby, mab_eyes_open) end
 	draw_fog()
-	draw_player()
+	draw_pandora()
 	draw_caption()
 	draw_moves()
 	draw_menu()
@@ -576,17 +734,18 @@ end
 
 function draw_level()
 	rectfill(0,0,127,127,level_bg[level])
-	map(map_data_pos[level][1], map_data_pos[level][2], 0, 0, 16, 16) -- draw entire map
-end
-
-function draw_socky()
+	-- draw map
+	map(map_data_pos[level][1], map_data_pos[level][2], 0, 0, 16, 16)
+	-- draw socky
 	if socky_collect == false then
 		spr(28, socky_pos[level][1] * 8, socky_pos[level][2] * 8)
 	end
-end
-
-function draw_goal()
-	spr(24, 120, goal_height[level] * 8)
+	if level == 1 then spr(252, 80, 24) end
+	if level == 16 then
+		spr(27, 56, 0) -- draw mab socky
+	else -- draw goal
+		spr(24, 120, goal_height[level] * 8)
+	end
 end
 
 function draw_obstacles()
@@ -609,7 +768,11 @@ function draw_fog()
 	end
 end
 
-function draw_player()
+function draw_pandora()
+	if spotlight then
+		circfill(x+dx+3, y+dy+3, 5, 10)
+		circfill(x+dx+3, y+dy+3, 4, 9)
+	end
 	if dir == "u" then spr(5 + anim_frame%2, x+dx, y+dy)
 	elseif dir == "d" then spr(3 + anim_frame%2, x+dx, y+dy)
 	elseif dir == "l" then spr(1 + anim_frame%2, x+dx, y+dy, 1, 1, true, false) -- flip r sprite
@@ -631,21 +794,27 @@ end
 
 function draw_moves()
 	local m = tostr(moves)
-	print3d(tostr(moves), 128 - #m*4, 0, 10, 0)
+	circfill(124, 2, 4, level_bg[level])
+	print3d(tostr(moves), 128 - #m*4, 0, 6, 0)
 end
 
 function draw_menu()
 	if menu_active == false then return end
 	local music_status = "on"
 	local sounds_status = "on"
+	local spotlight_status = "on"
 	if not play_music then music_status = "off" end
 	if not play_sounds then sounds_status = "off" end
+	if not spotlight then spotlight_status = "off" end
 
 	draw_menu_outline()
+	spr(192, 112, 16)
+	spr(195, 120, 16)
 	print("restart level", 32, 24, 12)
 	print("music is "..music_status, 32, 32, 14)
 	print("sounds are "..sounds_status, 32, 40, 15)
-	print("close", 32, 48, 8)
+	print("spotlight is "..spotlight_status, 32, 48, 9)
+	print("close", 32, 56, 8)
 	spr(24, 16, 16 + menu_option * 8)
 	draw_progress()
 end
@@ -666,7 +835,38 @@ function draw_progress()
 		spr(level_sprites[i], i*8 - 8, 88) -- level sprites
 		spr(medal_sprite[best_medal[i]], i*8 - 8, 96) -- medals
 	end
-	spr(1, level*8 - 8, 80) -- cat
+	rectfill(level*8 - 5, 80, 127, 87, 1) -- cut off progress bar
+	spr(1, level*8 - 7, 80) -- cat
+end
+
+function draw_mab_eyes(a, b)
+	if level != 16 then return end
+	for k in all(mab_data) do
+		local eye_sprite = 244
+		if k[5] == true then eye_sprite = 245 end
+		spr(eye_sprite, k[1]*8, k[2]*8)
+	end
+end
+
+function draw_mab(a, b, open)
+	if open then
+		eye_sprite_l = 237
+		eye_sprite_r = 238
+		mouth_sprite = 251
+	else
+		eye_sprite_l = 244
+		eye_sprite_r = 244
+		mouth_sprite = 250
+	end
+	spr(246, a*8, b*8)
+	spr(247, a*8 + 24, b*8)
+	rectfill(a*8, b*8+8, a*8+31, b*8+15, 7)
+	rectfill(a*8+8, b*8+16, a*8+23, b*8+23, 7)
+	spr(248, a*8, b*8+16)
+	spr(249, a*8+24, b*8+16)
+	spr(eye_sprite_l, a*8+5, b*8+9)
+	spr(eye_sprite_r, a*8+20, b*8+9)
+	spr(mouth_sprite, a*8+12, b*8+16)
 end
 
 function print3d(text, xpos, ypos, col1, col2)
@@ -727,14 +927,28 @@ function menu_choose()
 			sfx(41)
 		end
 	elseif menu_option == 4 then
+		spotlight = not spotlight
+	elseif menu_option == 5 then
 		menu_close()
 	end
 end
 
 function menu_close()
-	-- allow menu to be closed 
 	menu_active = false
 	in_game = true
+end
+
+function add_arrays(a, b)
+	-- see https://stackoverflow.com/questions/1410862/concatenation-of-tables-in-lua
+	-- and https://stackoverflow.com/questions/39185608/duplicating-tables-in-lua
+	local ab = {}
+	for i=1, #a do -- copy table a
+		ab[#ab + 1] = a[i]
+	end
+	for i=1, #b do -- then add each element of b
+		ab[#ab + 1] = b[i]
+	end
+	return ab
 end
 
 -- ## level by level data:
@@ -752,9 +966,9 @@ function game_get_data()
 		{0, 0, 0, 1, 2, 1, 0, 0, 0}
 	}
 	caption_pattern = {1, 2, 3, 2, 1} -- dictates colour of caption bars over time steps
-	level_bg = {3, 3, 3, 3, 0, 0, 12, 14, 12} -- level background colour
-	goal_height = {7, 9, 5, 10, 1, 14, 7, 7, 8} -- cells from top of screen, base 0
-	fog_height = {7, 6, 1, 1, 1, 3, 3, 1, 3} -- cells from top of screen, base 0. must be >= 1
+	level_bg = {3, 3, 3, 3, 0, 0, 12, 14, 12, 4, 4, 3, 5, 5, 4, 12} -- level background colour
+	goal_height = {7, 9, 5, 10, 1, 14, 7, 7, 8, 14, 3, 2, 10, 8, 15, 0} -- cells from top of screen, base 0
+	fog_height = {7, 6, 1, 1, 1, 3, 3, 1, 3, 1, 1, 3, 10, 2, 1, 4} -- cells from top of screen, base 0. must be >= 1
 	socky_pos = { -- in cells base 0
 		{15, 12}, -- 1
 		{2, 10}, -- 2
@@ -764,7 +978,14 @@ function game_get_data()
 		{11, 5}, -- 6
 		{1, 15}, -- 7
 		{2, 3}, -- 8
-		{8, 2} -- 9
+		{8, 2}, -- 9
+		{12, 7}, -- 10
+		{4, 15}, -- 11
+		{0, 3}, -- 12
+		{15, 1}, -- 13
+		{7, 2}, -- 14
+		{2, 15}, -- 15
+		{2, 10} -- 16
 	}
 	start_pos = { -- in pixels, 0 to 120
 		{24, 120}, -- 1
@@ -775,7 +996,14 @@ function game_get_data()
 		{0, 8}, -- 6
 		{0, 112}, -- 7
 		{0, 56}, -- 8
-		{0, 56} -- 9
+		{0, 56}, -- 9
+		{0, 56}, -- 10
+		{0, 112}, -- 11
+		{0, 8}, -- 12
+		{0, 8}, -- 13
+		{0, 64}, -- 14
+		{0, 0}, -- 15
+		{0, 120} -- 16
 	}
 	map_data_pos = { -- in cells on datasheet
 		{0, 0}, -- 1
@@ -786,7 +1014,39 @@ function game_get_data()
 		{80, 0}, -- 6
 		{96, 0}, -- 7
 		{112, 0}, -- 8
-		{0, 16} -- 9
+		{0, 16}, -- 9
+		{16, 16}, -- 10
+		{32, 16}, -- 11
+		{48, 16}, -- 12
+		{64, 16}, -- 13
+		{80, 16}, -- 14
+		{96, 16}, -- 15
+		{112, 16} -- 16
+	}
+	moves_data = {
+		-- [1] perfect score for each level without socky
+		-- [2] minimum moves needed to complete level with socky
+		-- excluding socky bonus, subtract 10 from final score when calculating this
+		-- [3] moves allowed for each level (default [1] + 5 but add more if harder)
+		-- [4] remaining points needed for gold (default 15 = perfect)
+		-- [5] remaining points needed for silver (default 10)
+		-- [6] remaining points needed for bronze (default 5, get through level as quick as poss without socky)
+		{34, 44, 39, 15, 10, 5},
+		{30, 62, 35, 15, 10, 5},
+		{28, 28, 33, 15, 10, 5}, -- level 3 is quickest with socky
+		{43, 53, 48, 15, 10, 5},
+		{80, 94, 90, 20, 15, 10}, -- give extra leeway as level is complex
+		{68, 76, 87, 29, 24, 19}, -- 6. perfect is 68 with shortcuts, 82 without shortcuts. So to be fair, moves allowed = 82 + 5.
+		{15, 22, 20, 15, 10, 5},
+		{21, 26, 26, 15, 10, 5},
+		{21, 22, 30, 19, 14, 9}, -- 9
+		{74, 94, 84, 20, 15, 10}, -- 10
+		{28, 35, 33, 15, 10, 5}, -- 11
+		{34, 42, 44, 20, 15, 10}, -- 12
+		{33, 41, 48, 25, 20, 15}, -- 13
+		{56, 64, 71, 25, 20, 15}, -- 14
+		{18, 19, 28, 20, 15, 10}, -- 15
+		{65, 73, 70, 15, 10, 5} -- 16
 	}
 	obs_data = {
 		-- in each level's data, each time period has a set of obstacles.
@@ -834,29 +1094,137 @@ function game_get_data()
 		},
 		{{{16, 16}}}, -- level 7
 		{{{16, 16}}}, -- level 8
-		{{{16, 16}}} -- level 9
+		{{{16, 16}}}, -- level 9
+		{{{16, 16}}}, -- level 10
+		{{{16, 16}}}, -- level 11
+		{{{16, 16}}}, -- level 12
+		{ -- level 13
+			{ -- period 1
+				{8, 6}, {6, 5}, {6, 2}, {9, 2}, {10, 4}, -- middle top
+				{13, 9}, {13, 6}, {11, 5}, {9, 7}, {10, 9}, -- right middle
+				{3, 8}, {6, 8}, {3, 5}, -- left top
+				{10, 12}, {7, 12}, {7, 9}, -- right bottom
+				{2, 10}, {1, 8}, -- left middle
+				{5, 13}, {7, 14}, -- middle bottom
+				{3, 13}, {4, 11}, {2, 12} -- left bottom
+			},
+			{ -- period 2
+				{7, 6}, {6, 4}, {7, 2}, {10, 2}, {10, 5}, -- middle top
+				{13, 8}, {13, 5}, {9, 8}, -- right middle
+				{4, 8}, {6, 7}, {5, 5}, {3, 6}, -- left top
+				{10, 10}, {9, 12}, {7, 11}, {8, 9}, -- right bottom
+				{3, 9}, {1, 10}, -- left middle
+				{6, 12}, {5, 14}, -- middle bottom
+				{4, 13}, {3, 11} -- left bottom
+			},
+			{ -- period 3
+				{9, 6}, {6, 6}, {6, 3}, {8, 2}, {10, 3}, -- middle top
+				{12, 9}, {13, 7}, {12, 5}, {9, 9}, -- right middle
+				{5, 8}, {4, 5}, {3, 7}, -- left top
+				{10, 11}, {8, 12}, {7, 10}, {9, 9}, -- right bottom
+				{3, 10}, {1, 9}, -- left middle
+				{5, 12}, {6, 14}, -- middle bottom
+				{4, 12}, {2, 11} -- left bottom
+			}
+		}, 
+		{ -- level 14
+			{ -- period 1
+				{11, 4}, {5, 6}, {1, 7}, {7, 8}, {1, 9}, {9, 10}, {3, 12}
+			},
+			{}, {} -- nothing in remaining 2 periods
+		},
+		{ -- level 15
+			{}, -- placeholders for each period, see below
+			{},
+			{},
+			{}
+		},
+		{{{16, 16}}} -- level 16
 	}
-	moves_data = {
-		-- [1] perfect score for each level without socky
-		-- [2] minimum moves needed to complete level with socky
-		-- excluding socky bonus, subtract 10 from final score when calculating this
-		-- [3] moves allowed for each level (default [1] + 5 but add more if harder)
-		-- [4] remaining points needed for gold (default 15)
-		-- [5] remaining points needed for silver (default 10)
-		-- [6] remaining points needed for bronze (default 5)
-		{34, 44, 39, 15, 10, 5},
-		{30, 62, 35, 15, 10, 5},
-		{28, 28, 33, 15, 10, 5}, -- level 3 is quickest with socky
-		{43, 53, 48, 15, 10, 5},
-		{80, 94, 90, 20, 15, 10}, -- give extra leeway as level is complex
-		{68, 76, 87, 29, 24, 19}, -- perfect is 68 with shortcuts, 82 without shortcuts. So to be fair, moves allowed = 82 + 5.
-		{15, 22, 20, 15, 10, 5},
-		{21, 26, 26, 15, 10, 5},
-		{21, 22, 30, 19, 14, 9}
+	-- level 15 data is repeated so split it up to prevent duplication:
+	level_15_obs_a = { -- 2x2 obstacles, periods 1 and 2
+		{4, 2}, {5, 2}, {4, 3}, {5, 3},
+		{2, 4}, {3, 4}, {2, 5}, {3, 5},
+		{6, 4}, {7, 4}, {6, 5}, {7, 5},
+		{4, 6}, {5, 6}, {4, 7}, {5, 7},
+		{8, 6}, {9, 6}, {8, 7}, {9, 7},
+		{6, 8}, {7, 8}, {6, 9}, {7, 9},
+		{10, 8}, {11, 8}, {10, 9}, {11, 9},
+		{8, 10}, {9, 10}, {8, 11}, {9, 11}
 	}
-	ice_data = {false, false, false, false, false, false, true, true, true}
-	level_sprites = {34, 49, 80, 100, 88, 91, 113, 209, 118} -- for progress bar
-	best_medal = {4, 4, 4, 4, 4, 4, 4, 4, 4} -- best medal for each level so far, 1=gold, 4=none
+	level_15_obs_b = { -- 2x2 obstacles, periods 3 and 4
+		{2, 2}, {3, 2}, {2, 3}, {3, 3},
+		{6, 2}, {7, 2}, {6, 3}, {7, 3},
+		{10, 2}, {11, 2}, {10, 3}, {11, 3},
+		{4, 4}, {5, 4}, {4, 5}, {5, 5},
+		{8, 4}, {9, 4}, {8, 5}, {9, 5},
+		{2, 6}, {3, 6}, {2, 7}, {3, 7},
+		{6, 6}, {7, 6}, {6, 7}, {7, 7},
+		{10, 6}, {11, 6}, {11, 7},
+		{4, 8}, {5, 8}, {4, 9}, {5, 9},
+		{2, 10}, {3, 10}, {2, 11}, {3, 11},
+		{6, 10}, {6, 11}, {7, 11},
+		{10, 10}, {11, 10}, {10, 11}, {11, 11}
+	}
+	level_15_obs_c = { -- 1x1 obstacles at bottom right, periods 1 and 3
+		{13, 4}, {12, 5}, {13, 6}, {12, 7},
+		{13, 8}, {12, 9}, {13, 10}, {12, 11},
+		{4, 13}, {5, 12}, {6, 13}, {7, 12},
+		{8, 13}, {9, 12}, {10, 13}, {11, 12},
+		{12, 13}, {13, 12}
+	}
+	level_15_obs_d = { -- 1x1 obstacles at bottom right, periods 2 and 4
+		{12, 4}, {13, 5}, {12, 6}, {13, 7},
+		{12, 8}, {13, 9}, {12, 10}, {13, 11},
+		{4, 12}, {5, 13}, {6, 12}, {7, 13},
+		{8, 12}, {9, 13}, {10, 12}, {11, 13},
+		{12, 12}, {13, 13}
+	}
+	obs_data[15][1] = add_arrays(level_15_obs_a, level_15_obs_c)
+	obs_data[15][2] = add_arrays(level_15_obs_a, level_15_obs_d)
+	obs_data[15][3] = add_arrays(level_15_obs_b, level_15_obs_c)
+	obs_data[15][4] = add_arrays(level_15_obs_b, level_15_obs_d)
+	switch_data = {
+		-- switch x/y, door x/y, 1st switch sprite, is_open?
+		{{16}}, -- 16 means no switches
+		{{16}},
+		{{16}},
+		{{16}},
+		{{16}},
+		{{16}},
+		{{16}},
+		{{16}},
+		{{16}},
+		{
+			{2, 0, 11, 14, 233, false},
+			{12, 2, 13, 14, 233, false},
+			{14, 12, 9, 14, 233, false},
+		},
+		{
+			{1, 12, 3, 2, 233, false},
+			{10, 12, 3, 15, 233, false},
+			{6, 7, 13, 3, 233, false},
+			{9, 7, 3, 13, 233, false}
+		},
+		{
+			{12, 12, 1, 6, 233, false},
+			{6, 4, 12, 5, 233, false},
+			{1, 10, 12, 7, 233, false},
+			{3, 2, 10, 7, 233, false},
+			{10, 6, 14, 2, 217, false}
+		},
+		{{16}},
+		{ -- level 14
+			{14, 5, 3, 4, 217, false},
+			{0, 4, 11, 12, 217, false},
+			{14, 11, 13, 8, 217, false}
+		},
+		{{16}},
+		{{16}}
+	}
+	ice_data = {false, false, false, false, false, false, true, true, true, false, false, false, false, false, false, false}
+	level_sprites = {34, 49, 80, 100, 88, 91, 113, 209, 118, 227, 239, 28, 205, 214, 222, 244} -- for progress bar
+	best_medal = {4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4} -- best medal for each level so far, 1=gold, 4=none
 end
 
 --[[ some characters
@@ -875,30 +1243,30 @@ __gfx__
 00700700000000dd0000000dd50000ddd00000ddd00000ddd00000dd000000000000000000000000000000000000000004000400060006000240420005000500
 0000000050ddd0dd0ddddd0ddd00d0dddd0d00dddd0d05dddd00d0dd000000000000000000000000000000000000000000444000006660000022200000050000
 00000000dddddddddddddddddddddddddddddddddddddddddddddddd000000000000000000000000000000000000000000000000000000000000000000000000
-d1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d111d111d1111111111111111111111111dddadddd000000000000000000000000ddddfefdddd7dddddddddddddddddddd
-dddddddddddddddd1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111ddd99ddd000000000000000000000000ddddfef0de2e28dddddddddddddddddd
-ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111111111111111111119a999add000000000000000000000000dddd8880d27e800dddd8ddddddd8dddd
-dddddddddddddddddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d111d11111111a999a99d000000000000000000000000ddd8ff807ee8220ddd8d0ddddddd8ddd
-d1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d111d111d1111111111111111111111111999a9950000000000000000000000000dd88ff00d2820000ddd8ddddddd8d0dd
-dddddddddddddddd1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111d509950d000000000000000000000000f8ff880dd802020ddddd0ddddddd0ddd
-ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d111111111111111111111111111ddd950dd000000000000000000000000f88f800ddd00000ddddddddddddddddd
-dddddddddddddddddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d111d11111111dddd0ddd000000000000000000000000d00000dddddd0ddddddddddddddddddd
-ddddddddddddddddffffff4f555555555555555555555555444444444dddddddffffff4fff7777ff4610011fffffff4fdd45554ddddddddddddddddddddddddd
-ddddddddddddddddffffff4f555ffffffffffffffffff5552424242424ddddddfffff400ff7777ff4110011fffffff4fd4ffff43d8ddd8dddddddddddddddddd
-ddddddddddddddddfffffffffffff0f0f0f0f0f0f0f0ffff44444444444dddddfffff405fff77fff4110511fffffffffdf0f2f43dd0ddd0dddd8dddddddddddd
-dddddddddddddddd44f44f44f4fff4f4f4f4f4f4f4f4ff0f424242424242dddd44f44450477777744115511444f44f44dfff0f4ddddddddddd8d8ddddd8d8ddd
-ddddddddddddddddff4ffffff0fff0f0f0f0f0f0f0f0ff4f4444444444444dddff4ff4004110061f4115511fff4fffffdf3fff43ddddddddddd0d0ddddd8d0dd
-dddddddddddddfddfffffffff0fff3f0f0f0f3f0f0f0ff3f24242424242424ddfffff4004110011f4115511fffffffff3f0f1f43d8ddd8dddddddddddddd0ddd
-dddddddddfddddddff4ffffff4fff3fff4fff3fff4ffff3f444444444444444dff4ff4444116011f77777777ff4fffff3fff1f3ddd0ddd0ddddddddddddddddd
-ddddddddddddddddf444f44ffffddddddddddddddddddfff4242424242424242f444f44f4110011f77777777f444f44fd333d33ddddddddddddddddddddddddd
-ccccccccccccccccccccccccccccccccccccccccddb35dddd533323d35333233ddddddddccccccccccccccccccccccccddbdd23d000000000000000000000000
-cccccccccccccccccccc76ccddccccccccccccccd33b35dd3355335333553353dddaddddccccccccccccccddccccccccd33d23bd000000000000000000000000
-cccccccccccc76ccccc76ccc3dddcccccccccccc3b3330dd5333303553333030ddbdddddccccccccccccddd3cc5ccccc323b3353000000000000000000000000
-ccccccccc76c776ccccccccc3bddddcccccccccc3333335d3033333550333305ddddddddccccccccccdd333dcc5cccccd3205230000000000000000000000000
-cccccccc7777766ccccccccc333333ddccccccccd305305d23355333d55050ddddddddddccccccccdd33b3d3cc5cccccb3032035000000000000000000000000
-ccccccccc666c6cccccccccc3333335dddccccccd5d405dd33533030dddddddddbddddddccccccddd3333333c555cccc32300350000000000000000000000000
-ccccccccccccccccc76cccccd3b33335ddddccccddd42ddd55333325ddddddddddddddadccccddb333333350c555cccc23050500000000000000000000000000
-ccccccccccccccccccccccccd533350dddddddccddd42dddd2500550ddddddddddddddddccdd3dddd533350dc555ccccd00050dd000000000000000000000000
+d1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d111d111d1111111111111111111111111dddadddd0000000000000000dddd282dddddfefdddd7dddddddddddddddddddd
+dddddddddddddddd1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111ddd99ddd0000000000000000dddd2820ddddfef0de2e28dddddddddddddddddd
+ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111111111111111111119a999add0000000000000000dddd1110dddd8880d27e800dddd8ddddddd8dddd
+dddddddddddddddddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d111d11111111a999a99d0000000000000000ddd12210ddd8ff807ee8220ddd8d0ddddddd8ddd
+d1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d111d111d1111111111111111111111111999a99500000000000000000dd112200dd88ff00d2820000ddd8ddddddd8d0dd
+dddddddddddddddd1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111d509950d00000000000000002122110df8ff880dd802020ddddd0ddddddd0ddd
+ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d111111111111111111111111111ddd950dd00000000000000002112100df88f800ddd00000ddddddddddddddddd
+dddddddddddddddddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d111d11111111dddd0ddd0000000000000000d00000ddd00000dddddd0ddddddddddddddddddd
+ddddddddddddddddffffff4f555555555555555555555555444444444dddddddffffff4fff7777ff4610011fddddddd4dd45554ddddddddddddddddddddddddd
+ddddddddddddddddffffff4f555ffffffffffffffffff5552424242424ddddddfffff400ff7777ff4110011fdddddd24d4ffff43d8ddd8dddddddddddddddddd
+ddddddddddddddddfffffffffffff0f0f0f0f0f0f0f0ffff44444444444dddddfffff405fff77fff4110511fddddd444df0f2f43dd0ddd0dddd8dddddddddddd
+dddddddddddddddd44f44f44f4fff4f4f4f4f4f4f4f4ff0f424242424242dddd44f444504777777441155114dddd4242dfff0f4ddddddddddd8d8ddddd8d8ddd
+ddddddddddddddddff4ffffff0fff0f0f0f0f0f0f0f0ff4f4444444444444dddff4ff4004110061f4115511fddd44444df3fff43ddddddddddd0d0ddddd8d0dd
+dddddddddddddfddfffffffff0fff3f0f0f0f3f0f0f0ff3f24242424242424ddfffff4004110011f4115511fdd2424243f0f1f43d8ddd8dddddddddddddd0ddd
+dddddddddfddddddff4ffffff4fff3fff4fff3fff4ffff3f444444444444444dff4ff4444116011f77777777d44444443fff1f3ddd0ddd0ddddddddddddddddd
+ddddddddddddddddf444f44ffffddddddddddddddddddfff4242424242424242f444f44f4110011f7777777742424242d333d33ddddddddddddddddddddddddd
+ccccccccccccccccccccccccccccccccccccccccddb35dddd533323d35333233ddddddddccccccccccccccccccccccccddbdd23d33333b3b0000000000000000
+cccccccccccccccccccc76ccddccccccccccccccd33b35dd3355335333553353dddaddddccccccccccccccddccccccccd33d23bd3333b3b30000000000000000
+cccccccccccc76ccccc76ccc3dddcccccccccccc3b3330dd5333303553333030ddbdddddccccccccccccddd3cc5ccccc323b335333333b3b0000000000000000
+ccccccccc76c776ccccccccc3bddddcccccccccc3333335d3033333550333305ddddddddccccccccccdd333dcc5cccccd32052303333b3b30000000000000000
+cccccccc7777766ccccccccc333333ddccccccccd305305d23355333d55050ddddddddddccccccccdd33b3d3cc5cccccb30320353b3b33330000000000000000
+ccccccccc666c6cccccccccc3333335dddccccccd5d405dd33533030dddddddddbddddddccccccddd3333333c555cccc32300350b3b333330000000000000000
+ccccccccccccccccc76cccccd3b33335ddddccccddd42ddd55333325ddddddddddddddadccccddb333333350c555cccc230505003b3b33330000000000000000
+ccccccccccccccccccccccccd533350dddddddccddd42dddd2500550ddddddddddddddddccdd3dddd533350dc555ccccd00050ddb3b333330000000000000000
 11111111001111110000000000111111000000001111111100111111c1111111dddd00000000dddd1ddddd1d1ddddd1d1ddd5d1d1d5d5d1d1d55051d15050515
 111111110011111100000000001111110000000011111c110011111111111111dd0000000000000dddd1ddddddd1dddd5dd1ddd555d1d5d50551d55005515050
 111111111111111111111111001111110011111111111111001111111c111111d00011111111110dddddddddd1ddd1ddd15dd1ddd15d515d5155515551055105
@@ -971,17 +1339,33 @@ d66666ddd66666dd5777775d5775775dddddddddfffffffdfffffff4ddddaaaaaaadddddadadadaa
 6ddddd6d6ddddd6dddddddddddddddddd6dddddd0004f4f40004f4f4adaddadddaddadadddaadddddddaadddadadadaddddddddddadddaddddaaaddd00000000
 d66666ddd66666dd5555555d5555555dddddddddfffff4fffffff4ffadadadaaadadadadddddaaaaaaadddddadadadadaaaaaaaaddaaadddaaadaaaa00000000
 dddddddddddddddddddddddddddddddddddddddd0000000000000d00adadadadadadadadddddddddddddddddadadadaddddddddddddddddddddddddd00000000
-22222222eeeeffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-22222222eeeeffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-88888888eeeeffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-88888888eeeeffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-99999999ffffeeee0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-99999999ffffeeee0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-aaaaaaaaffffeeee0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-aaaaaaaaffffeeee0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+11111111eeeeffff77777777d45454ddcc7c7c7c54545454a00aa00aa00aa00acc7c7c7cd555555dd555555dcc7c7c7cddddddddcc7c7c7ccc7c7c7c00000000
+11188881eeeeffff77777777d45954dd7dcdcdcd4444444400aa00aa0aaaaaaa7ccccccd08800880000bb000700cc00ddddbbddd7ccccccd7ccccccd00000000
+88899998eeeeffff77777777d45954ddccccccc1949494940aa00aa00aa00aa0ccc00cc15885588555bbbb55c00cc001ddb333ddcccaacc1cccaacc100000000
+999aaaa9eeeeffff77777777d45945dd7dcdcdcd99999959aa00aa00aaa00aa07cc00ccd000880000bb00bb07cc00ccddb3ddb3d7caaaacd7ccaaccd00000000
+aaabbbbaffffeeee77777777d54945ddccccccc19a9a9a5aa00aa00aaaaaaaaaccccccc1555885555bb55bb5ccc00cc1db3ddb3dcccaacc1ccaaaac100000000
+bbbccccbffffeeee77777777d59995dd7dcdcdcd55a0aa5000aa00aa0aa00aaa7cc00ccd0880088000bbbb00700cc00ddd3bb3dd7ccaaccd7ccaaccd00000000
+ccceeeecffffeeee77777777d54945ddccccccc15000a0000aa00aa00aaaaaa0ccccccc158855885555bb555c00cc001ddd33dddccccccc1ccccccc100000000
+eee1111effffeeee77777777d77477ddcd1d1d1d00000000aa00aa00aa00aa00cd1d1d1dd000000dd000000dcd1d1d1dddddddddcd1d1d1dcd1d1d1d00000000
+777777777777777f7f9ff490ffffffff7777777f7777777722224444ffffffff7f9ff4902929dddddddddddd99999999dddddddddd0ddddddddd0dddb333000a
+7ffffffffffffff47f9ff490944440407ffffff47666666722224444944440407f9ff4909299044dd444444d92299229dd999fddd0900ddddd0090dd00abb33b
+7ffff9ff7ffffff47f9ff4907f9ff4907ff7fff477777777222244447f9ff4907f9ff4902929404dd4aaa94d92229299d9fdd9fd0909900d0099090d3a300ab3
+7faffffffffffff47f9ff4907f9ff4907ffffff476666667222244447f9ff4907f9ff4909999004dd4a9a94d99222999d9fdd9fd0900090d0900090d33ab3303
+7ffffffffafffff47f9ff4907f9ff4907ffffaf477777777444422227f9ff4907f9ff490d040404dd4aaa94d99922299d9fdd9fd0900090d0900090d33b33a33
+7fffff7fffff9ff47f9ff4907f9ff4907f9ffff476666667444422227f9ff4907f9ff490d400004dd499994d99292229d9fdd9fdd09990ddd09990dd3333ab03
+7ffffffffffffff47f9ff490777779797ffffff477777777444422227f9ff49077777999d444444dd444444d92299229dd999fdddd000ddddd000ddd3ab330b3
+f4444444444444447f9ff490fffffffff444444477777777444422227f9ff490ffffffffdddddddddddddddd99999999dddddddddddddddddddddddda30abb30
+55555555994499496565656594994994dd000ddddd000ddd0dddddddddddddd7d77777777777777dd550055ddd5005dddddddddd0cc7ccccdddddddd99799499
+50c00006444594445050505044444444d09990ddd09990dd00dddddddddddd77dd777777777777ddd500005dd550055ddddddddd9797ccccdddddddd9da994d9
+5c0101064445444456565656444444440990990d0900090d000dddddddddd777dd777777777777dddd0000ddd608806ddddddddd7577007cddddd0d7d9a9949d
+501000064444944405050505444444440990990d0900090d0000dddddddd7777ddd7777777777dddddd00ddd66888866ddddddddc7777007d7077979dd9945dd
+500010064445944465656565444444440990990d0900090d00000dddddd77777dddd77777777ddddddd00ddd578228750d7dddddc700777770077757ddd94ddd
+50100006444544445050505044444444d09990ddd09990dd070700dddd777777ddddd777777ddddddd0000dd502002059790ddddc70777777770777ddd7a94dd
+50000006444594445656565644444444dd000ddddd000ddd0007000dd7777777ddddddd77ddddddd0600006050722705d7770ddd7777cc7007700777ddd94ddd
+56666666455545550505050555455455dddddddddddddddd7077707777777777dddddddddddddddddddddddddd6006dddd7d7ddd7cc7cc7c07ddd7d7d444500d
 __gff__
-0000000000000000000000000000000000000000000000000000000000200000000001010101010101010101010000000101010101010101000101010100000001010101010101010101000000000000010101010101010101010100000000000101010101010101000000000100010101010101010101010101000001010100
-0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000200000000001010101010101010101010000000101010101010101000101010140000001010101010101010101000000000000010101010101010101010100000000000101010101010101000000000100010101010101010101010101000001010100
+0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000101010101010101010100004001010101404001000001000101000101010101014001010000010000000100000100000000000000000000000000
 __map__
 30303030303030303030303030303030303030303030313030303030303030313030393a3653505050505050505243404b4b4b44000037363c3665666767676700000000000000005900000000585900585a586c596c6c6c6c6c6c6c6c6c6c6c7e7f7e7f7e7f7e7f7e7f7e7f7e7f707c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c
 333430303030303130303030303230303130303030303b303030303030303030393a36513651382100000000005143454b6e4b4a000000003736360062636464005800590000580000590058005c5b5b5b5b5b5b5b5c5c5d5d5d5c5c5b68696c7000000000000000000000000000007c7cd1d1d1d17c7cd1d1d1d1d17cd1d17c
@@ -999,30 +1383,30 @@ __map__
 2922220000000000000000510000513800000000000000210000000000002151000000514442000000444251363700516f006f21006e4b4c4d434f435f5e445d005a5900000058005800595a000000005b5b5b6c5c6c6c6c6c6c6c6c68696c6c7d7d7700007a0000000000000000007c7cd1d1d1d17cd1d1d17c7c7cd1d1d17c
 2a2222210000000000000051000051000021535054505238535054505200005100000051434521001d434051444242510000006f4a4b6e4d4d434f5f5e5e5d440000000058005a00005a0000580059005d6c6c6c5b5b5c5d005d5c5b6a6b5b5b00000000000000000000000000007a7c7cd17cd1d1d1d1d1d1d1d1d1d1d17c7c
 222228380000000021380000002100005050563851005550560051215550505600000051434042424241405143454051000000004a4b4c6e4d4342425e445d4300585a000000005800000000000000005d5d5d5d5d6c6c6c6c6c6c6c6c595a587d0000000000000000000000007a707c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c
-7e7f7e7f7e7600000000007a0000727f20000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-7978787800000000707b00000000007900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-7500000000000070007273007000007400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-7400700000727300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000007000000000000000000000760000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000000000000007600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-7700007100007100007100710071000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-000000000000007a000000000000007000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-7a000000000000007a00000000007a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0076007100007100007100710071007000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000007600007500007500000076000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0070000000007600007272730000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-000000007a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000700075000075007a7b7a0000700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000074000076000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0070000000000000007279797300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+7e7f7e7f7e7600000000007a0000727f0000000000e0e1000000000000e4e0e1e4d1e0e1e0e1e0e1e0e1e0e1e0e1e0e1e33c363c363334313030fd32393ac7cc2f1dc7ccc8decbd4d4cb000000000000d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d50000d6d6d6d6d6ded6d6d6d6d6d6d4d400310000000000003200000031320000
+7978787800000000707b00000000007900e4e0e100000000e0e1e0e100004be4e4d1d100d1e6e6e6e6e6e6d1d1d1d1d1003d3d353c363c363533e73a3c38cbd62f1dcbdecb00c9ccccca00c7ccccc8004c4bd8d6d6d6d6d6d6d6d6d6d6d6d61d0000000000000000000000000000d4e4f2f2f3f2f2f2f2f2f2f2f2f2f2f2f2f2
+d30000000000007000727300700000740000e4000000e4000000000000e44ce4e4d1e400efefefefe6efefefe0e1d1e4e3353d003d373c37383ce236370000002f1dc9ccca001f1f1f1f2fcbdddecb004b4a00000000d400d44a4b4c4d4e4fd6d6002d2d2f2f2d2dd4d42d2dd4d400e6f2f0f0f2f0f0f2f0f0f2f0f0f2f0f0f2
+74007000007273000000000000000000e300e300e300e3e0e1e0e100e0e14ee4e4d1e4e6e600e6e6e6e6e6e6e600d1003de43de43de437e43736e2350000cbd7d6c7c8d4d4d42ec7ccc82fcbd4d4cb004a00d400d4d4d4d6d4d6d4d4d44f5fd6d6002d2d2f2f2d2dd4d42d2dd4e400e6f2f0f0f1f0f0f1f0f0f1f0f0f1f0f0f2
+000000700000000000000000000076000038000000210000006fe44b4d4f5f5ee4d1efe636e6efefefefef36e6efd1e43def3d3d3d3d003d3d37e8000000c9ccd6c9cad4d4d42ecbddcb2fc9ccccca00d90000dbd6d6d6d6d6d6d6d7d45f5ed6d6001f1f2d2d2f2f2d2dd4d42f2d00e6e0e1e0e1e0e1e0e1e0e1e0e1e4f3e0e1
+000000000000000000d3000000000000e30044424200e3e4e0e1e0e1e0e14fe4e4e6efe6efe6e6e6e600e6efe6efe6e43de43de43de43de43de4e4e43de41dd4d6d4d42f1e1e2ec9ccca2d1e1e1e00000000d4d6d4d4d4d6ddd6d4d6d45ed9d6d6001f1f2d2d2f2f2d2dd4e42d2f00e6e7f1f3e7f3f1f3f1f3f1f3f1e7f1f3e7
+770000710000710000710071007100000000434045004a4c4d4e4f5f5ee44de4e4e6e6e6efe600000000e6efe6efe6e43d003d3d3d3d3def3d3500353def3dd4d6d4d42fc7c82e1e1e2dc7ccc82ec7ccd4d6d4d6d4d7d6d6d6d6d4d6d45dddd6d6002d2d1f1f2d2d1e1e2d2d2f2d00e6e2f0f0e2f0f0e7f0f0e7f0f0e2f0f0e2
+000000000000007a00000000000000e3000043404000e3e0e1e0e1e45de44be4e4e6efe6efe600000000e6efe6e6e6e43ce43de43de43ce43de400e400e43dd4d6d4d42fc9ca2e44422fcbd8cb2ecbd4d4d7d4d6d4d6d4d6d4d6d4d6d4d4d4d4dd002d2d1f1f2d2d1e1ed42d2d2f00e6e2f0f0e2e5f0e8f0f0e2f0f0e2f0f0e2
+7a000000000000007a00000000007a000000434040384a4b4d4e4f5f5ee400e4e4e6efe6e6e6002b2700e6efe6efe6e43d3d3d3d3d3d3d3d003d3d3d3d3d3dd4d61fd42d1f1f2e43402fc9ccca2ecbde0000d6d6d6d6d6d7d6d6d6d6d6db0000d600d4d42d2d2f2fd4d42f2f2f2d00e6e2f0f0e2f0f0f3f0f0e2f0f0e2f0f0e2
+007600710000710000710071007100e3e30043454721e3e4e0e1e0e1e0e100e4e4e6efe6efe626262626e6e6e6efe6e43de43de43de43de43de43de43de43dd4d62ecd2fd400001f1f1f2fd41f2ec9ccd4d7d4d6d4d6d4d6d4d6d4d6d4d4d4d4d600d4d42d2d2f2fd4e42f2f2d2f00e6e2f3f1e2e0e1e7f3f1e2f1f3e2f3f1e2
+000000760000750000750000007600000000002100000000e400000000004b4de4e6efe6efe6e6e6e6e6e6efe6efe6e43d003d3d3d3d3d3d3d3d003d3d3d00d4002e1e1e0000002ec7c82fd4d4000000d4d6d4d6d4d6d6d6d6d7d4d6d45dd4d6d6002d2dd4d42dde2f2f2d2d2f2d00e6e2f0f0e2f0f0e2f0f0e2f0f0e2f0f0e2
+00700000000076000072727300000000e300e300e300e300e400e44be0e100e4e4d1efe636efefefefefef36e6efd1e43de43de43de43de43de43de43de43dd4d6002f1e1e00dd2ec9ca2fd4d4c7ccc80000d4d6d4d6d4d6d4d4d4d6d45ed9d6d6002d2dd4e42d2d2f2f2d2d2d2f00e6e2f0f0e2f0f0e2f0f0e2f0f0e2f0f0e2
+000000007a0000000000000000000000e400e46ee40000000000e44d4fe400e4e400e4e6e6e6e6e6e6e600e6e6e4d1e43d3d003d3d3d3d3d3d3d3d3d003d3dd4d6002fcd2e2f1e2e1e1e1ed4d4cbd4cbde00d4d7d6d6d6d6d6d6d6db4f5f5ed6d600d4d42f2d2f2d2f2d2f2d2f2d00e6e2f0f0e2f0f0e8f0e5e2f0f0e2f0f0e2
+0000700075000075007a7b7a00007000e400e4e0e1e0e1e0e1e0e1e0e1e0e1e4e4d1e400efe6efefefe6efefe0e1d1e43de43de43de43de43de43de43de43dd4d600d41f2e2fcdd4d4d4d4c7c8c9ccca4a00d4d4d400d4d6d4d4d44dd44f5fd6d600d4e42d2f2d2f2d2f2d2f2d2f00e6e8f0f0e8f0f0f1f0f0e8f0f0e8f0f0e8
+00000000740000760000000000000000e4000000000000000000000000000000d1d1d1d1d1e6e6e6e6e6e6d1d1d1d1e41d3d3d3d003d3d3d3d3d003d003d3dd4d6000000001f1f2ed4d4d4c9ca1d1d1d4b4a00000000dd00004a4b4c4d4e4fd6d4d4000000000000000000000000e4e6e4f1f3f1f3f1e4f1f3e4e6f1e4f1f3e4
+00700000000000000072797973000000e0e1e0e1e0e1e0e1e0e1e0e1e0e1e0e1e0e1e400d1d1e4e0e1e0e1e0e1e4d1e4424242424242424242424242424242d4d4d6d6d6d6d7d6d6d6d6d6d6d6d6d6d64c4bd8d6d6d6d6d6d6d6d6d6d6d6d61dd4e400e6e6e6e6e6e6e6e6e6e6e6e600f1f3e0e1e0e1e0e1e0e1e6e6e6e6e0e1
 __sfx__
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-011000000905509005090550905509005090550905509005040550400504055040550400504055040550400500055000050005500055000050005500055000050b0550b0050b0550b0550b0050b0550b0550b005
-011000000963309603396332160308603096232d6230960309633046032d63327603046030962321623046030963300603396330060300603096232d62300603096330b6032d6330b6030b603096232162321603
-0110000021760217652170023760247602476521765217002376023765247652376521760217611c7611c70123760237651c7001c7601c765277002376023765237001c7601c76523700177651c7652376528765
-011000000960309603396032160308603096032d6030960309603046032d60327603046030960321603046032163300603396030060300603096032d60300603096030b6032d6030b60321613216132162321633
-0110000024754247543475424754247542475428754247541f7541f754237541f7541f7541f754237541f7541c7541c7541f7541c7541c7541c7541f7541c7541a7541a7541a7541e7541a7541a7541e7541a754
-001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+001000000905509005090550905509005090550905509005040550400504055040550400504055040550400500055000050005500055000050005500055000050b0550b0050b0550b0550b0050b0550b0550b005
+001000000963309603396332160308603096232d6230960309633046032d63327603046030962321623046030963300603396330060300603096232d62300603096330b6032d6330b6030b603096232162321603
+0010000021760217652170023760247602476521765217002376023765247652376521760217611c7611c70123760237651c7001c7601c765277002376023765237001c7601c76523700177651c7652376528765
+001000000960309603396032160308603096032d6030960309603046032d60327603046030960321603046032163300603396030060300603096032d60300603096030b6032d6030b60321613216132162321633
+0010000024754247543475424754247542475428754247541f7541f754237541f7541f7541f754237541f7541c7541c7541f7541c7541c7541c7541f7541c7541a7541a7541a7541e7541a7541a7541e7541a754
+001000000a600316000f600146001a600216002160000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -1065,6 +1449,7 @@ __sfx__
 00060000351202f15029170231601d15017140111300b120051102a100121001d1000f100181000c1000f10008100081000410001100021000010000100001000010000100001000010000100001000010000100
 001000000305000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 011000001a7701e7701f7701e770217702377024770267701f7701f7701f7701f7751f7651f7551f7451f73500700007000070000700007000070000700007000070000700007000070000700007000070000700
+000300000763007650076300a60024630246502463024610006000060000600006000060000600006000060000600006000060000600006000060000600006000060000600006000060000600006000060000600
 __music__
 00 41424344
 01 01515244
