@@ -6,7 +6,7 @@ Pandora is a pixelly cat game made using the [PICO-8 fantasy console](https://ww
 
 You can play the game on [andrewhick.com/games](https://www.andrewhick.com/games).
 
-Get through gardens, dungeons and mountains while looking for your long lost socky. You can get a medal at the end of each level.
+Get through gardens, dungeons and mountains while looking for your long lost socky. Defeat your nemesis. If you're particularly good, you get a medal at the end of each level.
 
 * Controls: up, down left and right :)
 * Computer: Z = OK or wait, X = menu
@@ -40,3 +40,6 @@ How it looks on a website:
 * 00 - First 6 levels
 * 01 - Menu and title screen
 * 02 - Ice levels (7-9)
+* 03 - All 16 levels completed
+* 04 - Hints and level names
+* 05 - Music varies by level type
