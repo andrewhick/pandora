@@ -8,9 +8,9 @@ You can play the game on [andrewhick.com/games](https://www.andrewhick.com/games
 
 Get through gardens, dungeons and mountains while looking for your long lost socky. Defeat your nemesis. If you're particularly good, you get a medal at the end of each level.
 
-* Controls: up, down left and right :)
-* Computer: Z = OK or wait, X = menu
-* Mobile: O = OK or wait, X = menu
+* Controls: Move using arrow keys / direction pad
+* On computer: Z = OK or wait, X = menu
+* On mobile: O = OK or wait, X = menu
 
 ## Editing
 
@@ -43,3 +43,4 @@ How it looks on a website:
 * 03 - All 16 levels completed
 * 04 - Hints and level names
 * 05 - Music varies by level type
+* 06 - End credits and bugfixes
