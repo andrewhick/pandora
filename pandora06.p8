@@ -11,7 +11,7 @@ __lua__
 
 function _init()
 	-- global variables:
-	game_version = "05"
+	game_version = "06"
 	level = 1
 	last_level = 16
 	debug_mode = false -- shows debug info and unfogs each level
@@ -23,6 +23,7 @@ function _init()
 	levelling_up = false
 	spotlight = false
 	hints_active = false
+	credits_active = false
 	t = 0 -- game time in frames
 	unfog_frames = 3 -- how fast the unfogging happens
 	caption_frames = 3 -- how fast the captions move
@@ -78,10 +79,14 @@ function _update()
 		elseif levelling_up then
 			level_end_process_option()
 		elseif lose then
-			lose = false
-			level_reset()
+			if btnp(4) then
+				lose = false
+				level_reset()
+			else return end
 		elseif win == false and lose == false then -- start new level
 			level_reset()
+		elseif win and not credits_active then
+			draw_credits()
 		else
 			_init()
 			return
@@ -163,6 +168,7 @@ function level_reset()
 	levelling_up = false
 	ice = ice_data[level]
 	sliding = false
+	hints_active = false
 	socky_add = 0
 	move_step = 9 -- to avoid cat sliding back across screen
 	anim_frame = 0 -- so that each level starts the same way
@@ -287,7 +293,8 @@ function game_lose()
 		mab_hit = false
 	end
 	rectfill(0, 40, 127, 79, lose_colour)
-	spr(1, 8, 64, 1, 1, false, true)
+	spr(1, 8, 64, 1, 1, false, true) -- upside down cat
+	draw_controls("z", 96, 64)
 	print3d(lose_text, 8, 48, 10, 0)
 	if play_sounds then sfx(51) end
 	lose = true
@@ -311,19 +318,15 @@ end
 -- 03 main melody
 -- 04 intro drum
 -- 05 descending backing
--- 06 dark tune part 1
--- 07 dark tune part 2
--- 08 dark bass
--- 09 dark tune part 3
--- 10 ominous echo drum
+-- 06-10 dark and final boss
 -- 11 start of final zone
--- 12 ice melody
--- 13-14 ice bass
+-- 12-14 ice
+-- 15-17 machine
 
 function move_process()
 	newx = x
 	newy = y
-	if not sliding then anim_frame += 1 end
+	if not sliding and not btnp(5) then anim_frame += 1 end
 	obstacle_update()
 	if btnp(5) then menu_open()
 	elseif sliding then move_attempt(dir)
@@ -870,7 +873,7 @@ function draw_menu()
 	draw_controls("x", 104, 16)
 	print("retry level", 32, 24, 8)
 	print("spotlight is "..spotlight_status, 32, 32, 9)
-	print("hints are "..hint_status, 32, 40, 10)
+	print("hints are "..hint_status.." this level", 32, 40, 10)
 	print("music is "..music_status, 32, 48, 11)
 	print("sounds are "..sounds_status, 32, 56, 12)
 	print("close", 32, 64, 14)
@@ -936,6 +939,20 @@ function draw_hints()
 		print3d(tostr(i), k[1]*8 + 2, k[2]*8 + 1, level_hint_colour[level], 0)
 		i += 1
 	end
+end
+
+function draw_credits()
+	rectfill(0, 16, 127, 111, 0)
+	print("pandora", 8, 24, 10)
+	print("by andrew hick", 40, 24, 9)
+	print("tested by:", 8, 40, 15)
+	print("alan, clive, dan, frieda,", 8, 48, 14)
+	print("iris, joe, mum, naomi, tim", 8, 56, 8)
+	print("and victoria", 8, 64, 12)
+	spr(11, 60, 63)
+	print("www.andrewhick.com", 8, 80, 11)
+	print("thanks for playing :)", 8, 96, 10)
+	credits_active = true
 end
 
 function print3d(text, xpos, ypos, col1, col2)
@@ -1044,7 +1061,7 @@ function game_get_data()
 	}
 	caption_pattern = {1, 2, 3, 2, 1} -- dictates colour of caption bars over time steps
 	level_name = {
-		"the back garden",
+		"catflap",
 		"mildly offensive",
 		"spiky junction",
 		"sunset swamp",
@@ -1376,14 +1393,14 @@ vˇ w∧ x❎ y▤ z▥
 ]]--
 
 __gfx__
-00000000ddd0dd0ddddddddddd0dd0ddddddddddd0dd0ddddddddddd0000000000000000000000000000000000000000a00000a0700000700000000000000000
-00000000ddd0a0adddd0dd0dd00a0add5d0dd0ddd0000dddd0dd0ddd00000000000000000000000000000000000000009aa0aa90670007609900099050000050
-00700700d000000dd000a0add00000dd000a0addd00000ddd0000d5d00000000000000000000000000000000000000009a0aa090607770604499944000505000
-00077000000000dd0000000dd00000dd000000ddd00000ddd000000d000000000000000000000000000000000000000090090090600600604004004050000050
-00077000000000dd000000ddd00000ddd00000ddd00000ddd000000d000000000000000000000000000000000000000049909940666666602444442000000000
-00700700000000dd0000000dd50000ddd00000ddd00000ddd00000dd000000000000000000000000000000000000000004000400060006000240420005000500
-0000000050ddd0dd0ddddd0ddd00d0dddd0d00dddd0d05dddd00d0dd000000000000000000000000000000000000000000444000006660000022200000050000
-00000000dddddddddddddddddddddddddddddddddddddddddddddddd000000000000000000000000000000000000000000000000000000000000000000000000
+00000000ddd0dd0ddddddddddd0dd0ddddddddddd0dd0ddddddddddd0000000000000000000000000000000008800880a00000a0700000700000000000000000
+00000000ddd0a0adddd0dd0dd00a0add5d0dd0ddd0000dddd0dd0ddd00000000000000000000000000000000888888889aa0aa90670007609900099050000050
+00700700d000000dd000a0add00000dd000a0addd00000ddd0000d5d00000000000000000000000000000000877888889a0aa090607770604499944000505000
+00077000000000dd0000000dd00000dd000000ddd00000ddd000000d000000000000000000000000000000008788888890090090600600604004004050000050
+00077000000000dd000000ddd00000ddd00000ddd00000ddd000000d000000000000000000000000000000000888888049909940666666602444442000000000
+00700700000000dd0000000dd50000ddd00000ddd00000ddd00000dd000000000000000000000000000000000888888004000400060006000240420005000500
+0000000050ddd0dd0ddddd0ddd00d0dddd0d00dddd0d05dddd00d0dd000000000000000000000000000000000088880000444000006660000022200000050000
+00000000dddddddddddddddddddddddddddddddddddddddddddddddd000000000000000000000000000000000008800000000000000000000000000000000000
 d1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d111d111d1111111111111111111111111dddadddd0000000000000000dddd282dddddfefdddd7dddddddddddddddddddd
 dddddddddddddddd1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111ddd99ddd0000000000000000dddd2820ddddfef0de2e28dddddddddddddddddd
 ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111111111111111111119a999add0000000000000000dddd1110dddd8880d27e800dddd8ddddddd8dddd
