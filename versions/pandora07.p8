@@ -11,9 +11,10 @@ __lua__
 
 function _init()
 	-- global variables:
-	game_version = "06"
+	game_version = "07"
 	level = 1
 	last_level = 16
+	selected_level = 1 -- used in menu
 	debug_mode = false -- shows debug info and unfogs each level
 	debug_text = "debug mode"
 	win = false
@@ -28,7 +29,7 @@ function _init()
 	unfog_frames = 3 -- how fast the unfogging happens
 	caption_frames = 3 -- how fast the captions move
 	cat_frames = 1 -- number of frames between each cat move animation
-	menu_items = 6
+	menu_items = 7
 	medal_text = {"gold", "silver", "bronze", "none"}
 	medal_sprite = {12, 13, 14, 15}
 	anim_frame = 0 -- allows sprites to animate
@@ -174,6 +175,7 @@ function level_reset()
 	anim_frame = 0 -- so that each level starts the same way
 	level_period = #obs_data[level]
 	dir = "r" -- current direction
+	selected_level = level
 	unfog_reset()
 	obstacle_update()
 	switch_reset()
@@ -868,16 +870,17 @@ function draw_menu()
 	if not play_sounds then sounds_status = "off" end
 	if not spotlight then spotlight_status = "off" end
 	if not hints_active then hint_status = "off" end
-
 	draw_menu_outline()
 	draw_controls("x", 104, 16)
-	print("retry level", 32, 24, 8)
-	print("spotlight is "..spotlight_status, 32, 32, 9)
-	print("hints are "..hint_status.." this level", 32, 40, 10)
-	print("music is "..music_status, 32, 48, 11)
-	print("sounds are "..sounds_status, 32, 56, 12)
-	print("close", 32, 64, 14)
-	spr(24, 16, 16 + menu_option * 8)
+	print("retry level", 24, 20, 8)
+	print("spotlight is "..spotlight_status, 24, 28, 9)
+	print("hints are "..hint_status.." this level", 24, 36, 10)
+	print("music is "..music_status, 24, 44, 11)
+	print("sounds are "..sounds_status, 24, 52, 12)
+	print("jump to level "..selected_level, 24, 60, 12)
+	print("close", 24, 68, 14)
+	spr(24, 8, 11 + menu_option * 8)
+	spr(25, (selected_level - 1) * 8, 104)
 	draw_progress()
 end
 
@@ -944,14 +947,14 @@ end
 function draw_credits()
 	rectfill(0, 16, 127, 111, 0)
 	print("pandora", 8, 24, 10)
-	print("by andrew hick", 40, 24, 9)
+	print("by andrew hick .com", 40, 24, 9)
 	print("tested by:", 8, 40, 15)
-	print("alan, clive, dan, frieda,", 8, 48, 14)
-	print("iris, joe, mum, naomi, tim", 8, 56, 8)
-	print("and victoria", 8, 64, 12)
-	spr(11, 60, 63)
-	print("www.andrewhick.com", 8, 80, 11)
-	print("thanks for playing :)", 8, 96, 10)
+	print("2bitchuck alan alex clive", 8, 48, 14)
+	print("dan frieda iris joe", 8, 56, 8)
+	print("kittycat mum naomi tim", 8, 64, 11)
+	print("and victoria", 8, 72, 12)
+	spr(11, 60, 71)
+	print("thanks for playing :)", 8, 88, 10)
 	credits_active = true
 end
 
@@ -977,7 +980,7 @@ end
 
 function menu_open()
 	menu_active = true
-	menu_option = 1 -- current selected menu
+	menu_option = 1 -- current selected option
 	-- set menu sprite for each cell
 	-- allow menu to be opened and closed using button 2
 	caption_show("menu", 2, 8, 14)
@@ -987,7 +990,7 @@ end
 function menu_process_input()
 	if btnp(⬆️) then menu_option -= 1
 	elseif btnp(⬇️) then menu_option += 1
-	elseif btnp(4) then menu_choose()
+	elseif btnp(4) or btnp(⬅️) or btnp (➡️) then menu_choose()
 	elseif btnp(5) then menu_close()
 	end
 	if menu_option > menu_items then menu_option = 1 end
@@ -995,20 +998,14 @@ function menu_process_input()
 end
 
 function menu_choose()
--- retry
--- spotlight
--- hints
--- music
--- sounds
--- close
-	if menu_option == 1 then level_reset()
+	if menu_option == 1 and btnp(4) then level_reset()
 	elseif menu_option == 4 then
 		if play_music then
 			play_music = false
 			music(-1)
 		else
 			play_music = true
-			music(1)
+			music(level_music[level])
 		end
 	elseif menu_option == 2 then
 		spotlight = not spotlight
@@ -1023,6 +1020,15 @@ function menu_choose()
 			sfx(41)
 		end
 	elseif menu_option == 6 then
+		-- todo level select
+		if btnp(⬅️) then
+			selected_level -= 1
+			if selected_level <=  0 then selected_level = 16 end
+		elseif btnp(➡️) then
+			selected_level += 1
+			if selected_level > 16 then selected_level = 1 end
+		elseif btnp(4) and selected_level != level then menu_close() end
+	elseif menu_option == 7 then
 		menu_close()
 	end
 end
@@ -1030,6 +1036,10 @@ end
 function menu_close()
 	menu_active = false
 	in_game = true
+	if selected_level != level then -- jump to a new level
+		level = selected_level
+		level_reset()
+	end
 end
 
 function add_arrays(a, b)
@@ -1159,29 +1169,31 @@ function game_get_data()
 		{112, 16} -- 16
 	}
 	moves_data = {
-		-- [1] perfect score for each level without socky
+		-- [1] minimum moves needed to complete level without socky
 		-- [2] minimum moves needed to complete level with socky
 		-- excluding socky bonus, subtract 10 from final score when calculating this
 		-- [3] moves allowed for each level (default [1] + 5 but add more if harder)
-		-- [4] remaining points needed for gold (default 15 = perfect)
-		-- [5] remaining points needed for silver (default 10)
+		-- [4] remaining points needed for gold
+		-- [5] remaining points needed for silver
 		-- [6] remaining points needed for bronze (default 5, get through level as quick as poss without socky)
-		{34, 44, 39, 15, 10, 5},
-		{30, 62, 35, 15, 10, 5},
-		{28, 28, 33, 15, 10, 5}, -- level 3 is quickest with socky
-		{43, 53, 48, 15, 10, 5},
-		{80, 94, 90, 20, 15, 10}, -- give extra leeway as level is complex
-		{68, 76, 87, 29, 24, 19}, -- 6. perfect is 68 with shortcuts, 82 without shortcuts. So to be fair, moves allowed = 82 + 5.
-		{15, 22, 20, 15, 10, 5},
-		{21, 26, 26, 15, 10, 5},
-		{21, 22, 30, 19, 14, 9}, -- 9
-		{74, 94, 84, 20, 15, 10}, -- 10
-		{28, 35, 33, 15, 10, 5}, -- 11
-		{34, 42, 44, 20, 15, 10}, -- 12
-		{33, 41, 48, 25, 20, 15}, -- 13
-		{52, 62, 67, 25, 20, 15}, -- 14
-		{18, 19, 28, 20, 15, 10}, -- 15
-		{65, 73, 70, 15, 10, 5} -- 16
+		-- if increasing the number of allowed moves by m,
+		-- 1 and 2 won't change, and increase 3,4,5,6 by m. 
+		{34, 44, 44, 20, 15, 10}, -- (+5 moves compared to v6)
+		{30, 62, 40, 20, 15, 10}, -- +5
+		{28, 28, 38, 20, 15, 10}, -- +5, level 3 is quickest with socky
+		{43, 53, 53, 20, 15, 10}, -- +5
+		{80, 94, 95, 25, 20, 15}, -- +5. extra leeway as level is complex
+		{68, 76, 98, 40, 35, 30}, -- +11. perfect is 68 with shortcuts, 82 without shortcuts. So to be fair, moves allowed = 82 + 16.
+		{15, 22, 25, 20, 15, 10}, -- +5
+		{21, 26, 36, 25, 20, 15}, -- +10
+		{21, 22, 41, 30, 25, 20}, -- +11
+		{74, 94, 94, 30, 25, 20}, -- +10
+		{28, 35, 43, 25, 20, 15}, -- +10
+		{34, 42, 59, 35, 30, 25}, -- +15
+		{33, 41, 63, 40, 35, 30}, -- +15
+		{52, 62, 82, 40, 35, 30}, -- +15
+		{18, 19, 43, 35, 30, 25}, -- +15
+		{65, 73, 80, 25, 20, 15} -- +10 
 	}
 	obs_data = {
 		-- in each level's data, each time period has a set of obstacles.
@@ -1299,10 +1311,10 @@ function game_get_data()
 		{8, 4}, {9, 4}, {8, 5}, {9, 5},
 		{2, 6}, {3, 6}, {2, 7}, {3, 7},
 		{6, 6}, {7, 6}, {6, 7}, {7, 7},
-		{10, 6}, {11, 6}, {11, 7},
+		-- {10, 6}, {11, 6}, {11, 7}, commented to give respite
 		{4, 8}, {5, 8}, {4, 9}, {5, 9},
 		{2, 10}, {3, 10}, {2, 11}, {3, 11},
-		{6, 10}, {6, 11}, {7, 11},
+		-- {6, 10}, {6, 11}, {7, 11},
 		{10, 10}, {11, 10}, {10, 11}, {11, 11}
 	}
 	level_15_obs_c = { -- 1x1 obstacles at bottom right, periods 1 and 3
@@ -1401,14 +1413,14 @@ __gfx__
 00700700000000dd0000000dd50000ddd00000ddd00000ddd00000dd000000000000000000000000000000000888888004000400060006000240420005000500
 0000000050ddd0dd0ddddd0ddd00d0dddd0d00dddd0d05dddd00d0dd000000000000000000000000000000000088880000444000006660000022200000050000
 00000000dddddddddddddddddddddddddddddddddddddddddddddddd000000000000000000000000000000000008800000000000000000000000000000000000
-d1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d111d111d1111111111111111111111111dddadddd0000000000000000dddd282dddddfefdddd7dddddddddddddddddddd
-dddddddddddddddd1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111ddd99ddd0000000000000000dddd2820ddddfef0de2e28dddddddddddddddddd
-ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111111111111111111119a999add0000000000000000dddd1110dddd8880d27e800dddd8ddddddd8dddd
-dddddddddddddddddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d111d11111111a999a99d0000000000000000ddd12210ddd8ff807ee8220ddd8d0ddddddd8ddd
-d1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d111d111d1111111111111111111111111999a99500000000000000000dd112200dd88ff00d2820000ddd8ddddddd8d0dd
-dddddddddddddddd1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111d509950d00000000000000002122110df8ff880dd802020ddddd0ddddddd0ddd
-ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d111111111111111111111111111ddd950dd00000000000000002112100df88f800ddd00000ddddddddddddddddd
-dddddddddddddddddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d111d11111111dddd0ddd0000000000000000d00000ddd00000dddddd0ddddddddddddddddddd
+d1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d111d111d1111111111111111111111111dddadddddddadddd00000000dddd282dddddfefdddd7dddddddddddddddddddd
+dddddddddddddddd1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111ddd99ddddda99ddd00000000dddd2820ddddfef0de2e28dddddddddddddddddd
+ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111111111111111111119a999addda999add00000000dddd1110dddd8880d27e800dddd8ddddddd8dddd
+dddddddddddddddddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d111d11111111a999a99da999a99d00000000ddd12210ddd8ff807ee8220ddd8d0ddddddd8ddd
+d1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d111d111d1111111111111111111111111999a9950d59a900000000000dd112200dd88ff00d2820000ddd8ddddddd8d0dd
+dddddddddddddddd1ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d1111111111d509950ddda990dd000000002122110df8ff880dd802020ddddd0ddddddd0ddd
+ddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d111111111111111111111111111ddd950dddd9990dd000000002112100df88f800ddd00000ddddddddddddddddd
+dddddddddddddddddd1ddd1d1d1d1d1d1d1d1d1d1d1d1d1d111d111d11111111dddd0dddddd000dd00000000d00000ddd00000dddddd0ddddddddddddddddddd
 ddddddddddddddddffffff4f555555555555555555555555444444444dddddddffffff4fff7777ff4610011fddddddd4dd45554ddddddddddddddddddddddddd
 ddddddddddddddddffffff4f555ffffffffffffffffff5552424242424ddddddfffff400ff7777ff4110011fdddddd24d4ffff43d8ddd8dddddddddddddddddd
 ddddddddddddddddfffffffffffff0f0f0f0f0f0f0f0ffff44444444444dddddfffff405fff77fff4110511fddddd444df0f2f43dd0ddd0dddd8dddddddddddd
@@ -1677,12 +1689,12 @@ d30000000000007000727300700000740000e4000000e4000000000000e44ce4e4d1e400efefefef
 740070007b76730000007b007b000000e300e300e300e3e0e1e0e100e0e14ee4e4d1e4e6e600e6e6e6e6e6e6e600d1003de43de43de437e43736e2350000cbd7d6c7c8d4d4d42ec7ccc82fcbd4d4cb004a00d400d4d4d4d6d4d6d4d4d44f5fd6d6002d2d2f2f2d2dd4d42d2dd4e400e6f2f0f0f1f0f0f1f0f0f1f0f0f1f0f0f2
 000000700000000000000000000076000038000000210000006fe44b4d4f5f5ee4d1efe636e6efefefefef36e6efd1e43def3d3d3d3d003d3d37e8000000c9ccd6c9cad4d4d42ecbddcb2fc9ccccca00d90000dbd6d6d6d6d6d6d6d6d45f5ed6d6001f1f2d2d2f2f2d2dd4d42f2d00e6e0e1e0e1e0e1e0e1e0e1e0e1e4f3e0e1
 000000000000000000d300000000007be30044424200e3e4e0e1e0e1e0e14fe4e4e6efe6efe6e6e6e600e6efe6efe6e43de43de43de43de43de4e4e43de41dd4d6d4d42f1e1e2ec9ccca2d1e1e1e00000000d4d6d4d4d4d6ddd6d4d6d45ed9d6d6001f1f2d2d2f2f2d2dd4e42d2f00e6e7f1f3e7f3f1f3f1f3f1f3f1e7f1f3e7
-770000710000710000710071007100000000434045004a4c4d4e4f5f5ee44de4e4e6e6e6efe600000000e6efe6efe6e43d003d3d3d3d3def3d3500353def3dd4d6d4d42fc7c82e1e1e2dc7ccc82ec7ccd4d6d4d6d4d6d6d6d6d6d4d6d45dddd6d6002d2d1f1f2d2d1e1e2d2d2f2d00e6e2f0f0e2f0f0e7f0f0e7f0f0e2f0f0e2
-000000000000007a00000000000000e3000043404000e3e0e1e0e1e45de44be4e4e6efe6efe600000000e6efe6e6e6e43ce43de43de43ce43de400e400e43dd4d6d4d42fc9ca2e44422fcbd8cb2ecbd4d4d7d4d6d4d6d4d6d4d6d4d6d4d4d4d4dd002d2d1f1f2d2d1e1ed42d2d2f00e6e2f0f0e2e5f0e8f0f0e2f0f0e2f0f0e2
+770000710000710000710071007100000000434045004a4c4d4e4f5f5ee44de4e4e6e6e6efe600000000e6efe6efe6e43d003d3d3d3d3def3d3500353def3dd4d6d4d42fc7c82e1e1e2dc7ccc82ec7ccd4d6d4d6d4d6d6d6d6d6d4d6d45dddd6d6002d2d1f1f2d2d1e1e00002f2d00e6e2f0f0e2f0f0e7f0f0e7f0f0e2f0f0e2
+000000000000007a00000000000000e3000043404000e3e0e1e0e1e45de44be4e4e6efe6efe600000000e6efe6e6e6e43ce43de43de43ce43de400e400e43dd4d6d4d42fc9ca2e44422fcbd8cb2ecbd4d4d7d4d6d4d6d4d6d4d6d4d6d4d4d4d4dd002d2d1f1f2d2d1e1ed4002d2f00e6e2f0f0e2e5f0e8f0f0e2f0f0e2f0f0e2
 7b000000000000007a00000000007a000000434040384a4b4d4e4f5f5ee400e4e4e6efe6e6e6002b2700e6efe6efe6e43d3d3d3d3d3d3d3d003d3d3d3d3d3dd4d61fd42d1f1f2e43402fc9ccca2ecbde0000d6d6d6d6d6d7d6d6d6d6d6db0000d600d4d42d2d2f2fd4d42f2f2f2d00e6e2f0f0e2f0f0f3f0f0e2f0f0e2f0f0e2
 007600710000710000710071007100e3e30043454721e3e4e0e1e0e1e0e100e4e4e6efe6efe626262626e6e6e6efe6e43de43de43de43de43de43de43de43dd4d62ecd2fd400001f1f1f2fd41f2ec9ccd4d7d4d6d4d6d4d6d4d6d4d6d4d4d4d4d600d4d42d2d2f2fd4e42f2f2d2f00e6e2f3f1e2e0e1e7f3f1e2f1f3e2f3f1e2
-000000760000750000750000007600000000002100000000e400000000004b4de4e6efe6efe6e6e6e6e6e6efe6efe6e43d003d3d3d3d3d3d3d3d003d3d3d00d4002e1e1e0000002ec7c82fd4d4000000d4d6d4d6d4d6d6d6d6d6d4d6d45dd4d6d6002d2dd4d42dde2f2f2d2d2f2d00e6e2f0f0e2f0f0e2f0f0e2f0f0e2f0f0e2
-00700000000076000072727300000000e300e300e300e300e400e44be0e100e4e4d1efe636efefefefefef36e6efd1e43de43de43de43de43de43de43de43dd4d6002f1e1e00dd2ec9ca2fd4d4c7ccc80000d4d6d4d6d4d6d4d4d4d6d45ed9d6d6002d2dd4e42d2d2f2f2d2d2d2f00e6e2f0f0e2f0f0e2f0f0e2f0f0e2f0f0e2
+000000760000750000750000007600000000002100000000e400000000004b4de4e6efe6efe6e6e6e6e6e6efe6efe6e43d003d3d3d3d3d3d3d3d003d3d3d00d4002e1e1e0000002ec7c82fd4d4000000d4d6d4d6d4d6d6d6d6d6d4d6d45dd4d6d6002d2dd4d400de2f2f2d2d2f2d00e6e2f0f0e2f0f0e2f0f0e2f0f0e2f0f0e2
+00700000000076000072727300000000e300e300e300e300e400e44be0e100e4e4d1efe636efefefefefef36e6efd1e43de43de43de43de43de43de43de43dd4d6002f1e1e00dd2ec9ca2fd4d4c7ccc80000d4d6d4d6d4d6d4d4d4d6d45ed9d6d6002d2dd4e400002f2f2d2d2d2f00e6e2f0f0e2f0f0e2f0f0e2f0f0e2f0f0e2
 7b0000007a00007b0000000000000000e400e46ee40000000000e44d4fe400e4e400e4e6e6e6e6e6e6e600e6e6e4d1e43d3d003d3d3d3d3d3d3d3d3d003d3dd4d6002fcd2e2f1e2e1e1e1ed4d4cbd4cbde00d4d6d6d6d6d6d6d6d6db4f5f5ed6d600d4d42f2d2f2d2f2d2f2d2f2d00e6e2f0f0e2f0f0e8f0e5e2f0f0e2f0f0e2
 0000700075000075007a7b7a00007000e400e4e0e1e0e1e0e1e0e1e0e1e0e1e4e4d1e400efe6efefefe6efefe0e1d1e43de43de43de43de43de43de43de43dd4d600d41f2e2fcdd4d4d4d4c7c8c9ccca4a00d4d4d400d4d6d4d4d44dd44f5fd6d600d4e42d2f2d2f2d2f2d2f2d2f00e6e8f0f0e8f0f0f1f0f0e8f0f0e8f0f0e8
 00000000760000760000000000007b00e4000000000000000000000000000000d1d1d1d1d1e6e6e6e6e6e6d1d1d1d1e41d3d3d3d003d3d3d3d3d003d003d3dd4d6000000001f1f2ed4d4d4c9ca1d1d1d4b4a00000000dd00004a4b4c4d4e4fd6d4d4000000000000000000000000e4e6e4f1f3f1f3f1e4f1f3e4e6f1e4f1f3e4
